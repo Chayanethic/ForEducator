@@ -1,20 +1,11 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { authMiddleware } from "@clerk/nextjs/server";
 
-// Define the routes you want anyone to be able to see without logging in
-const isPublicRoute = createRouteMatcher([
-  '/',
-  '/student(.*)', 
-  '/admin(.*)',
-  '/educator(.*)',
-  '/api/(.*)'
-]);
-
-export default clerkMiddleware((auth, req) => {
-  if (!isPublicRoute(req)) {
-    auth().protect();
-  }
+// This uses the older, more stable 'authMiddleware' 
+// which is less likely to crash on version mismatches.
+export default authMiddleware({
+  publicRoutes: ["/", "/api/(.*)", "/student(.*)", "/admin(.*)", "/educator(.*)", "/sign-in(.*)", "/sign-up(.*)"],
 });
 
 export const config = {
   matcher: ["/((?!.*\\..*|_next).*)", "/", "/(api|trpc)(.*)"],
-};
+}; 

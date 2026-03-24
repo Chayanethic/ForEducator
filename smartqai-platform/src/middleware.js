@@ -1,10 +1,19 @@
-import { authMiddleware } from "@clerk/nextjs";
+import { authMiddleware } from "@clerk/nextjs/server";
 
 export default authMiddleware({
-  // This ensures the middleware doesn't block these routes during the build/test phase
-  publicRoutes: ["/", "/api/(.*)", "/sign-in(.*)", "/sign-up(.*)", "/student(.*)", "/admin(.*)", "/onboarding(.*)"],
+  // These routes are accessible to EVERYONE (logged in or not)
+  publicRoutes: [
+    "/", 
+    "/sign-in(.*)", 
+    "/sign-up(.*)", 
+    "/api/(.*)",
+    "/student(.*)", // Temporary: allow access to test the UI
+    "/admin(.*)",
+    "/educator(.*)"
+  ],
 });
 
 export const config = {
+  // This regex matches all routes except static files (images, etc.)
   matcher: ["/((?!.*\\..*|_next).*)", "/", "/(api|trpc)(.*)"],
 };

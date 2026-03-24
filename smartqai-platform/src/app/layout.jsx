@@ -8,8 +8,12 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    // Wrap the HTML with ClerkProvider
-    <ClerkProvider>
+    <ClerkProvider 
+      allowedRedirectOrigins={[
+        'http://localhost:3000', 
+        'https://smartqai2.vercel.app'
+      ]}
+    >
       <html lang="en">
         <body className="bg-slate-50 text-slate-800 antialiased">
           {children}

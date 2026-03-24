@@ -9,4 +9,5 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+export default nextConfig; 
+// Note: If your file is named next.config.js, change this last line to: module.exports = nextConfig;

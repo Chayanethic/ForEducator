@@ -1,11 +1,10 @@
-import { authMiddleware } from "@clerk/nextjs/server";
+import { authMiddleware } from "@clerk/nextjs";
 
-// This uses the older, more stable 'authMiddleware' 
-// which is less likely to crash on version mismatches.
 export default authMiddleware({
-  publicRoutes: ["/", "/api/(.*)", "/student(.*)", "/admin(.*)", "/educator(.*)", "/sign-in(.*)", "/sign-up(.*)"],
+  // This ensures the middleware doesn't block these routes during the build/test phase
+  publicRoutes: ["/", "/api/(.*)", "/sign-in(.*)", "/sign-up(.*)", "/student(.*)", "/admin(.*)", "/onboarding(.*)"],
 });
 
 export const config = {
   matcher: ["/((?!.*\\..*|_next).*)", "/", "/(api|trpc)(.*)"],
-}; 
+};

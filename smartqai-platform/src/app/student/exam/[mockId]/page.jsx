@@ -6,7 +6,7 @@ import { useUser } from "@clerk/nextjs";
 import { doc, getDoc, collection, getDocs, addDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
-// --- NEW: DRAGGABLE TCS iON CALCULATOR COMPONENT ---
+// --- DRAGGABLE TCS iON CALCULATOR COMPONENT ---
 const DraggableCalculator = ({ onClose }) => {
   const [position, setPosition] = useState({ x: 100, y: 100 });
   const [isDragging, setIsDragging] = useState(false);
@@ -39,7 +39,7 @@ const DraggableCalculator = ({ onClose }) => {
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
-    };
+    }
   }, [isDragging, dragOffset]);
 
   const handleInput = (val) => setDisplay((prev) => prev + val);
@@ -48,11 +48,10 @@ const DraggableCalculator = ({ onClose }) => {
   
   const handleCalculate = () => {
     try {
-      // Safe, basic evaluation replacing ^ with JS exponentiation
       const sanitized = display.replace(/\^/g, '**');
       // eslint-disable-next-line no-new-func
       const result = new Function('return ' + sanitized)();
-      setDisplay(String(Number(result.toFixed(6)))); // Round to avoid float issues
+      setDisplay(String(Number(result.toFixed(6))));
     } catch (error) {
       setDisplay("Error");
       setTimeout(() => setDisplay(""), 1500);
@@ -60,67 +59,45 @@ const DraggableCalculator = ({ onClose }) => {
   };
 
   return (
-    <div 
-      style={{ left: position.x, top: position.y, position: 'fixed', zIndex: 9999 }}
-      className="w-80 bg-slate-100 rounded-lg shadow-2xl border border-slate-300 overflow-hidden flex flex-col font-sans"
-    >
-      {/* Draggable Header */}
-      <div 
-        onMouseDown={handleMouseDown}
-        className="bg-indigo-600 text-white px-4 py-2 cursor-grab active:cursor-grabbing flex justify-between items-center select-none"
-      >
+    <div style={{ left: position.x, top: position.y, position: 'fixed', zIndex: 9999 }} className="w-80 bg-slate-100 rounded-lg shadow-2xl border border-slate-300 overflow-hidden flex flex-col font-sans">
+      <div onMouseDown={handleMouseDown} className="bg-indigo-600 text-white px-4 py-2 cursor-grab active:cursor-grabbing flex justify-between items-center select-none">
         <div className="font-bold text-sm tracking-wide"><i className="fas fa-calculator mr-2"></i> Scientific Calculator</div>
         <button onClick={onClose} className="hover:text-rose-300 transition"><i className="fas fa-times"></i></button>
       </div>
-
-      {/* Screen */}
       <div className="p-4 bg-white border-b border-slate-200">
-        <div className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-right font-mono text-xl text-slate-800 h-10 overflow-hidden tracking-wider shadow-inner">
-          {display || "0"}
-        </div>
+        <div className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-right font-mono text-xl text-slate-800 h-10 overflow-hidden tracking-wider shadow-inner">{display || "0"}</div>
       </div>
-
-      {/* Keypad */}
       <div className="p-3 grid grid-cols-5 gap-2 bg-slate-200">
-        {/* Row 1 */}
         <button onClick={() => handleInput('Math.sin(')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">sin</button>
         <button onClick={() => handleInput('Math.cos(')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">cos</button>
         <button onClick={() => handleInput('Math.tan(')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">tan</button>
         <button onClick={() => handleInput('(')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">(</button>
         <button onClick={() => handleInput(')')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">)</button>
-
-        {/* Row 2 */}
         <button onClick={() => handleInput('Math.sqrt(')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">√</button>
         <button onClick={() => handleInput('^')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">x^y</button>
         <button onClick={() => handleInput('Math.log10(')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">log</button>
         <button onClick={handleClear} className="bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold rounded py-2 shadow-sm transition col-span-2">Clear</button>
-
-        {/* Numpad Area */}
         <button onClick={() => handleInput('7')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">7</button>
         <button onClick={() => handleInput('8')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">8</button>
         <button onClick={() => handleInput('9')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">9</button>
         <button onClick={handleBackspace} className="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded py-2 shadow-sm transition"><i className="fas fa-backspace"></i></button>
         <button onClick={() => handleInput('/')} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-sm font-bold rounded py-2 shadow-sm transition">/</button>
-
         <button onClick={() => handleInput('4')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">4</button>
         <button onClick={() => handleInput('5')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">5</button>
         <button onClick={() => handleInput('6')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">6</button>
         <button onClick={() => handleInput('*')} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-sm font-bold rounded py-2 shadow-sm transition">*</button>
         <button onClick={() => handleInput('-')} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-sm font-bold rounded py-2 shadow-sm transition">-</button>
-
         <button onClick={() => handleInput('1')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">1</button>
         <button onClick={() => handleInput('2')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">2</button>
         <button onClick={() => handleInput('3')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">3</button>
         <button onClick={() => handleInput('+')} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-sm font-bold rounded py-2 shadow-sm transition row-span-2 flex items-center justify-center h-full">+</button>
         <button onClick={handleCalculate} className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded py-2 shadow-sm transition row-span-2 flex items-center justify-center h-full">=</button>
-
         <button onClick={() => handleInput('0')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition col-span-2">0</button>
         <button onClick={() => handleInput('.')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">.</button>
       </div>
     </div>
   );
 };
-// --------------------------------------------------------
 
 export default function ExamInterface() {
   const { mockId } = useParams();
@@ -150,9 +127,7 @@ export default function ExamInterface() {
   const [statuses, setStatuses] = useState([]); 
   const [timeLeft, setTimeLeft] = useState(3600); 
   
-  // Controls the new custom calculator
   const [showCalculator, setShowCalculator] = useState(false);
-
   const containerRef = useRef(null);
 
   const showToast = (message, type = "success") => {
@@ -205,13 +180,11 @@ export default function ExamInterface() {
   useEffect(() => {
     if (examPhase === 'active') {
       window.history.pushState(null, null, window.location.href);
-
       const handlePopState = () => {
         window.history.pushState(null, null, window.location.href);
         exitFullScreen(); 
         triggerExitWarning(); 
       };
-
       window.addEventListener('popstate', handlePopState);
       return () => window.removeEventListener('popstate', handlePopState);
     }
@@ -334,27 +307,72 @@ export default function ExamInterface() {
     if (firstQuestionIndex !== -1) navigateTo(firstQuestionIndex, sec);
   };
 
-  const handleSelectOption = (optionId) => {
-    const newAnswers = { ...answers, [currentIndex]: optionId };
+  // --- UPGRADED: Check if a question has a valid answer based on type ---
+  const checkHasAnswer = (ansObj, index, qType) => {
+    const ans = ansObj[index];
+    if (ans === undefined || ans === null) return false;
+    if (qType === 'MSQ' && Array.isArray(ans)) return ans.length > 0;
+    return String(ans).trim() !== '';
+  };
+
+  // --- UPGRADED: Handle MSQ, NAT, and MCQ Changes Safely ---
+  const handleAnswerChange = (val, type) => {
+    const newAnswers = { ...answers };
+    
+    if (type === 'MSQ') {
+      const currentAns = Array.isArray(newAnswers[currentIndex]) ? newAnswers[currentIndex] : [];
+      if (currentAns.includes(val)) {
+        newAnswers[currentIndex] = currentAns.filter(item => item !== val);
+      } else {
+        newAnswers[currentIndex] = [...currentAns, val];
+      }
+    } else {
+      newAnswers[currentIndex] = val;
+    }
+    
     setAnswers(newAnswers);
-    saveProgressToCloud(newAnswers, statuses); 
+
+    // Update the local status to reflect changes immediately
+    const updatedStatuses = [...statuses];
+    const hasAns = checkHasAnswer(newAnswers, currentIndex, type);
+    
+    if (updatedStatuses[currentIndex] === 'marked' || updatedStatuses[currentIndex] === 'answered-marked') {
+      updatedStatuses[currentIndex] = hasAns ? 'answered-marked' : 'marked';
+    } else {
+      updatedStatuses[currentIndex] = hasAns ? 'answered' : 'not-answered';
+    }
+    
+    setStatuses(updatedStatuses);
+    saveProgressToCloud(newAnswers, updatedStatuses);
   };
 
   const clearResponse = () => {
     const newAnswers = { ...answers };
     delete newAnswers[currentIndex];
     setAnswers(newAnswers);
-    saveProgressToCloud(newAnswers, statuses);
+    
+    const updatedStatuses = [...statuses];
+    // Clearing removes the mark as per TCS iON standards
+    updatedStatuses[currentIndex] = 'not-answered';
+    setStatuses(updatedStatuses);
+    
+    saveProgressToCloud(newAnswers, updatedStatuses);
   };
 
+  // --- FIXED: Navigation preserves Marks perfectly ---
   const navigateTo = (newIndex, forceSection = null) => {
-    const currentStatus = statuses[currentIndex];
     const updatedStatuses = [...statuses];
+    const currentQType = questions[currentIndex]?.type || 'MCQ';
     
-    if (currentStatus === 'not-answered' || currentStatus === 'not-visited') {
-       updatedStatuses[currentIndex] = answers[currentIndex] ? 'answered' : 'not-answered';
+    // Only alter the current question if it isn't marked
+    if (updatedStatuses[currentIndex] !== 'marked' && updatedStatuses[currentIndex] !== 'answered-marked') {
+       updatedStatuses[currentIndex] = checkHasAnswer(answers, currentIndex, currentQType) ? 'answered' : 'not-answered';
     }
-    if (updatedStatuses[newIndex] === 'not-visited') updatedStatuses[newIndex] = 'not-answered';
+    
+    // Set the new question to not-answered if it was never visited
+    if (updatedStatuses[newIndex] === 'not-visited') {
+      updatedStatuses[newIndex] = 'not-answered';
+    }
 
     setStatuses(updatedStatuses);
     setCurrentIndex(newIndex);
@@ -366,25 +384,38 @@ export default function ExamInterface() {
 
   const saveAndNext = () => {
     const updatedStatuses = [...statuses];
-    updatedStatuses[currentIndex] = answers[currentIndex] ? 'answered' : 'not-answered';
+    const currentQType = questions[currentIndex]?.type || 'MCQ';
+    
+    // Saving clears any mark
+    updatedStatuses[currentIndex] = checkHasAnswer(answers, currentIndex, currentQType) ? 'answered' : 'not-answered';
+    
     if (currentIndex < questions.length - 1) navigateTo(currentIndex + 1);
     else { setStatuses(updatedStatuses); saveProgressToCloud(answers, updatedStatuses); }
   };
 
   const markAndNext = () => {
     const updatedStatuses = [...statuses];
-    updatedStatuses[currentIndex] = answers[currentIndex] ? 'answered-marked' : 'marked';
+    const currentQType = questions[currentIndex]?.type || 'MCQ';
+    
+    // Explicitly lock in the mark state
+    updatedStatuses[currentIndex] = checkHasAnswer(answers, currentIndex, currentQType) ? 'answered-marked' : 'marked';
+    
     if (currentIndex < questions.length - 1) navigateTo(currentIndex + 1);
     else { setStatuses(updatedStatuses); saveProgressToCloud(answers, updatedStatuses); }
   };
 
   const triggerSubmitConfirmation = () => {
-    const unattempted = questions.length - Object.keys(answers).length;
+    let answeredCount = 0;
+    questions.forEach((q, idx) => {
+      if (checkHasAnswer(answers, idx, q.type)) answeredCount++;
+    });
+    
+    const unattempted = questions.length - answeredCount;
     setModal({
       show: true,
       type: "confirm",
       title: "Submit Exam?",
-      message: `You have answered ${Object.keys(answers).length} questions and left ${unattempted} unattempted. Are you sure you want to submit?`,
+      message: `You have answered ${answeredCount} questions and left ${unattempted} unattempted. Are you sure you want to submit?`,
       confirmText: "Yes, Submit Exam",
       cancelText: "Resume Exam",
       hideCancel: false,
@@ -409,16 +440,42 @@ export default function ExamInterface() {
     });
   };
 
+  // --- UPGRADED: AI Scoring Engine for MSQ and NAT ---
   const executeSubmit = async () => {
     setExamPhase('submitting');
     exitFullScreen();
     
     try {
       let score = 0; let correct = 0; let incorrect = 0;
+      
       questions.forEach((q, index) => {
-        if (answers[index]) {
-          if (answers[index] === q.correctOption) { score += Number(q.marks) || 2; correct++; } 
-          else { score -= Number(q.negativeMarks) || 0.66; incorrect++; }
+        const hasAns = checkHasAnswer(answers, index, q.type);
+        if (hasAns) {
+          let isCorrect = false;
+          const studentAns = answers[index];
+          
+          if (q.type === 'MSQ') {
+            const correctArr = Array.isArray(q.correctAnswer) ? q.correctAnswer : [];
+            const studentArr = Array.isArray(studentAns) ? studentAns : [];
+            // Exact match for MSQ
+            if (correctArr.length === studentArr.length && correctArr.every(val => studentArr.includes(val))) {
+              isCorrect = true;
+            }
+          } else if (q.type === 'NAT') {
+            // Compare as floats to allow "4.5" to equal "4.50"
+            isCorrect = parseFloat(studentAns) === parseFloat(q.correctAnswer);
+          } else {
+            // Standard MCQ
+            isCorrect = studentAns === q.correctAnswer || studentAns === q.correctOption;
+          }
+
+          if (isCorrect) { 
+            score += Number(q.marks) || 2; 
+            correct++; 
+          } else { 
+            score -= Number(q.negativeMarks) || 0.66; 
+            incorrect++; 
+          }
         }
       });
 
@@ -534,6 +591,7 @@ export default function ExamInterface() {
 
   // --- UI: ACTIVE EXAM PHASE ---
   const currentQ = questions[currentIndex];
+  const currentQType = currentQ.type || 'MCQ';
   const currentSectionQuestions = questions.map((q, idx) => ({ ...q, globalIndex: idx })).filter(q => (q.section || "General") === activeSection);
   const localQuestionNumber = currentSectionQuestions.findIndex(q => q.globalIndex === currentIndex) + 1;
 
@@ -547,10 +605,8 @@ export default function ExamInterface() {
         .animate-slide-up { animation: slideUp 0.3s ease-out forwards; }
       `}} />
 
-      {/* RENDER DRAGGABLE CALCULATOR IF ACTIVE */}
       {showCalculator && <DraggableCalculator onClose={() => setShowCalculator(false)} />}
 
-      {/* CUSTOM TOAST NOTIFICATION */}
       {toast.show && (
         <div className={`fixed bottom-8 right-8 px-6 py-4 rounded-xl shadow-2xl z-50 flex items-center gap-3 animate-slide-up ${toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
           <i className={`fas ${toast.type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'} text-xl`}></i>
@@ -558,7 +614,6 @@ export default function ExamInterface() {
         </div>
       )}
 
-      {/* CUSTOM MODAL SYSTEM */}
       {modal.show && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-6">
           <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center">
@@ -627,7 +682,11 @@ export default function ExamInterface() {
           </div>
 
           <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-indigo-50 shrink-0">
-            <h2 className="text-lg font-black text-slate-800">Question No. {localQuestionNumber || 1}</h2>
+            <div className="flex items-center gap-4">
+               <h2 className="text-lg font-black text-slate-800">Question No. {localQuestionNumber || 1}</h2>
+               <span className="px-3 py-1 bg-white text-indigo-600 rounded-lg text-xs font-black uppercase tracking-wider border border-indigo-200 shadow-sm">{currentQType}</span>
+            </div>
+            
             <div className="flex gap-6 text-sm font-bold text-slate-600 bg-white px-4 py-1.5 rounded-full border border-indigo-100 shadow-sm">
                 <div className="flex items-center gap-1"><i className="fas fa-plus-circle text-emerald-500"></i> {currentQ.marks || 2} Marks</div>
                 <div className="flex items-center gap-1"><i className="fas fa-minus-circle text-rose-500"></i> {currentQ.negativeMarks || 0.66} Marks</div>
@@ -642,17 +701,44 @@ export default function ExamInterface() {
                     <img src={currentQ.imageUrl} alt="Diagram" className="max-h-80 object-contain" />
                   </div>
                 )}
-                <div className="space-y-4 mt-6">
-                    {currentQ.options?.map((opt, i) => (
-                      <label key={i} className={`flex items-start gap-4 p-4 border-2 rounded-xl cursor-pointer transition-all shadow-sm ${answers[currentIndex] === opt.id ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-slate-300 bg-white'}`}>
-                          <input type="radio" name={`q-${currentIndex}`} checked={answers[currentIndex] === opt.id} onChange={() => handleSelectOption(opt.id)} className="mt-1 w-5 h-5 cursor-pointer shrink-0 accent-indigo-600" />
-                          <div>
-                            <span className="block font-bold text-slate-800 text-base">{opt.text}</span>
-                            {opt.imageUrl && <img src={opt.imageUrl} alt={`Option ${opt.id}`} className="max-h-32 mt-3 object-contain border border-slate-200 rounded-lg p-1 bg-white shadow-sm" />}
-                          </div>
-                      </label>
-                    ))}
-                </div>
+                
+                {/* --- UPGRADED: DYNAMIC QUESTION RENDERER --- */}
+                {currentQType === 'NAT' ? (
+                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 mt-6 shadow-inner w-full max-w-sm">
+                    <label className="block text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">Enter Numerical Value:</label>
+                    <input 
+                      type="number" 
+                      value={answers[currentIndex] || ''} 
+                      onChange={(e) => handleAnswerChange(e.target.value, 'NAT')}
+                      className="w-full bg-white border-2 border-slate-300 rounded-xl p-4 text-2xl font-black text-slate-800 outline-none focus:border-indigo-500 shadow-sm transition"
+                      placeholder="e.g. 4.5"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-4 mt-6">
+                      {currentQ.options?.map((opt, i) => {
+                        const isSelected = currentQType === 'MSQ' 
+                          ? (Array.isArray(answers[currentIndex]) && answers[currentIndex].includes(opt.id))
+                          : answers[currentIndex] === opt.id;
+
+                        return (
+                          <label key={i} className={`flex items-start gap-4 p-4 border-2 rounded-xl cursor-pointer transition-all shadow-sm ${isSelected ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-slate-300 bg-white'}`}>
+                              <input 
+                                type={currentQType === 'MSQ' ? "checkbox" : "radio"} 
+                                name={currentQType === 'MSQ' ? `q-${currentIndex}-${i}` : `q-${currentIndex}`} 
+                                checked={isSelected} 
+                                onChange={() => handleAnswerChange(opt.id, currentQType)} 
+                                className={`mt-1 w-5 h-5 cursor-pointer shrink-0 accent-indigo-600 ${currentQType === 'MSQ' ? 'rounded-sm' : ''}`} 
+                              />
+                              <div>
+                                <span className="block font-bold text-slate-800 text-base">{opt.text}</span>
+                                {opt.imageUrl && <img src={opt.imageUrl} alt={`Option ${opt.id}`} className="max-h-32 mt-3 object-contain border border-slate-200 rounded-lg p-1 bg-white shadow-sm" />}
+                              </div>
+                          </label>
+                        )
+                      })}
+                  </div>
+                )}
             </div>
           </div>
 

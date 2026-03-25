@@ -6,20 +6,16 @@ import { useState, useEffect, Suspense } from "react";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
-// We extract the main content into a separate component so we can wrap it in Suspense
 function OnboardingContent() {
   const { user, isLoaded } = useUser();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [isSelecting, setIsSelecting] = useState(false);
 
-  // Check if the user is explicitly trying to switch roles via the URL parameter
   const isSwitching = searchParams.get("switch") === "true";
 
-  // Check if they already chose a role in the past to skip this page
   useEffect(() => {
     const checkExistingRole = async () => {
-      // ONLY auto-redirect if they are logged in AND they are NOT trying to switch roles
       if (user && !isSwitching) {
         const userRef = doc(db, "users", user.id);
         const userSnap = await getDoc(userRef);
@@ -38,16 +34,14 @@ function OnboardingContent() {
     setIsSelecting(true);
 
     try {
-      // Save the user profile and role to Firebase globally
       await setDoc(doc(db, "users", user.id), {
         name: user.fullName || "User",
         email: user.primaryEmailAddress?.emailAddress || "",
         avatar: user.imageUrl || "",
         role: selectedRole,
-        joinedAt: new Date() // Note: merge: true prevents overwriting joinedAt on subsequent switches
+        joinedAt: new Date() 
       }, { merge: true });
 
-      // Route them based on selection
       if (selectedRole === "educator") {
         router.push("/educator/create-mock");
       } else {
@@ -62,55 +56,79 @@ function OnboardingContent() {
 
   if (!isLoaded || isSelecting) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i>
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,theme(colors.indigo.100)_0%,transparent_100%)] opacity-50"></div>
+        <div className="relative z-10 flex flex-col items-center">
+            <i className="fas fa-circle-notch fa-spin text-5xl text-indigo-600 mb-4"></i>
+            <h2 className="text-xl font-bold text-slate-700 animate-pulse">
+                {isSelecting ? "Configuring your workspace..." : "Loading profile..."}
+            </h2>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 relative overflow-hidden">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 relative overflow-hidden font-sans">
       
-      {/* Background decoration */}
-      <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-3xl"></div>
-      <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-3xl"></div>
+      {/* --- AMBIENT BACKGROUND EFFECTS --- */}
+      <div className="absolute top-[-10%] left-[-10%] w-[600px] h-[600px] bg-indigo-400/20 rounded-full blur-[120px] animate-pulse pointer-events-none"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-emerald-400/20 rounded-full blur-[120px] animate-pulse pointer-events-none" style={{ animationDelay: '2s' }}></div>
 
-      <div className="max-w-3xl w-full relative z-10 text-center">
-        <div className="w-16 h-16 bg-white text-indigo-600 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-6 shadow-sm border border-slate-100">
-          <i className="fas fa-user-astronaut"></i>
+      <div className="max-w-4xl w-full relative z-10 text-center animate-in fade-in slide-in-from-bottom-8 duration-700">
+        
+        <div className="w-20 h-20 bg-white text-indigo-600 rounded-[2rem] flex items-center justify-center text-4xl mx-auto mb-8 shadow-xl shadow-indigo-600/10 border border-slate-100 transform -rotate-3">
+          <i className="fas fa-brain"></i>
         </div>
-        <h1 className="text-3xl md:text-4xl font-black text-slate-800 mb-3">How will you use SmartQAI?</h1>
-        <p className="text-slate-500 mb-10 text-lg">Choose your primary role to set up your dashboard.</p>
+        
+        <h1 className="text-4xl md:text-5xl font-black text-slate-900 mb-4 tracking-tight">
+          Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-emerald-500">SmartQAI</span>
+        </h1>
+        <p className="text-slate-500 mb-12 text-lg md:text-xl font-medium max-w-2xl mx-auto">
+          To tailor your dashboard experience, please select how you will be using the platform today.
+        </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           
-          {/* Educator Card */}
+          {/* --- EDUCATOR CARD --- */}
           <button 
             onClick={() => handleRoleSelection("educator")}
-            className="group bg-white p-8 rounded-3xl border-2 border-slate-100 hover:border-emerald-500 hover:shadow-xl hover:shadow-emerald-500/10 transition-all text-left flex flex-col h-full"
+            className="group bg-white p-10 rounded-[2rem] border-2 border-slate-100 hover:border-emerald-500 hover:shadow-2xl hover:shadow-emerald-500/20 hover:-translate-y-2 transition-all duration-300 text-left flex flex-col h-full relative overflow-hidden"
           >
-            <div className="w-16 h-16 bg-slate-50 text-slate-400 group-hover:bg-emerald-50 group-hover:text-emerald-600 rounded-2xl flex items-center justify-center text-3xl mb-6 transition-colors">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-emerald-100 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-bl-full pointer-events-none"></div>
+            
+            <div className="w-20 h-20 bg-slate-50 text-slate-400 group-hover:bg-gradient-to-br group-hover:from-emerald-400 group-hover:to-emerald-600 group-hover:text-white rounded-2xl flex items-center justify-center text-4xl mb-8 transition-all duration-300 shadow-sm group-hover:shadow-lg group-hover:shadow-emerald-500/30">
               <i className="fas fa-chalkboard-teacher"></i>
             </div>
-            <h3 className="text-2xl font-bold text-slate-800 mb-2">I am an Educator</h3>
-            <p className="text-slate-500 mb-8 flex-1">I want to upload PDFs, extract questions using AI, and host live mock exams for my students.</p>
-            <div className="text-sm font-bold text-slate-400 group-hover:text-emerald-600 flex items-center gap-2 transition-colors">
-              Continue as Educator <i className="fas fa-arrow-right"></i>
+            
+            <h3 className="text-3xl font-black text-slate-900 mb-4 tracking-tight">I am an Educator</h3>
+            <p className="text-slate-600 mb-10 flex-1 text-lg leading-relaxed">
+              Upload past papers, leverage AI to generate MSQ/NAT questions, and host strict, anti-cheat mock exams for your students.
+            </p>
+            
+            <div className="text-base font-black text-slate-400 group-hover:text-emerald-600 flex items-center gap-3 transition-colors mt-auto">
+              Access Exam Studio <i className="fas fa-arrow-right transform group-hover:translate-x-1 transition-transform"></i>
             </div>
           </button>
 
-          {/* Student Card */}
+          {/* --- STUDENT CARD --- */}
           <button 
             onClick={() => handleRoleSelection("student")}
-            className="group bg-white p-8 rounded-3xl border-2 border-slate-100 hover:border-indigo-500 hover:shadow-xl hover:shadow-indigo-500/10 transition-all text-left flex flex-col h-full"
+            className="group bg-white p-10 rounded-[2rem] border-2 border-slate-100 hover:border-indigo-500 hover:shadow-2xl hover:shadow-indigo-500/20 hover:-translate-y-2 transition-all duration-300 text-left flex flex-col h-full relative overflow-hidden"
           >
-            <div className="w-16 h-16 bg-slate-50 text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-600 rounded-2xl flex items-center justify-center text-3xl mb-6 transition-colors">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-indigo-100 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-bl-full pointer-events-none"></div>
+
+            <div className="w-20 h-20 bg-slate-50 text-slate-400 group-hover:bg-gradient-to-br group-hover:from-indigo-500 group-hover:to-indigo-700 group-hover:text-white rounded-2xl flex items-center justify-center text-4xl mb-8 transition-all duration-300 shadow-sm group-hover:shadow-lg group-hover:shadow-indigo-500/30">
               <i className="fas fa-user-graduate"></i>
             </div>
-            <h3 className="text-2xl font-bold text-slate-800 mb-2">I am a Student</h3>
-            <p className="text-slate-500 mb-8 flex-1">I want to join live exams, practice previous papers, and get AI-driven insights on my weak topics.</p>
-            <div className="text-sm font-bold text-slate-400 group-hover:text-indigo-600 flex items-center gap-2 transition-colors">
-              Continue as Student <i className="fas fa-arrow-right"></i>
+            
+            <h3 className="text-3xl font-black text-slate-900 mb-4 tracking-tight">I am a Student</h3>
+            <p className="text-slate-600 mb-10 flex-1 text-lg leading-relaxed">
+              Join live GATE rooms, practice official PYQs, and review AI-generated explanations to strengthen your weak concepts.
+            </p>
+            
+            <div className="text-base font-black text-slate-400 group-hover:text-indigo-600 flex items-center gap-3 transition-colors mt-auto">
+              Enter Student Portal <i className="fas fa-arrow-right transform group-hover:translate-x-1 transition-transform"></i>
             </div>
           </button>
 
@@ -120,12 +138,11 @@ function OnboardingContent() {
   );
 }
 
-// Next.js requires useSearchParams to be wrapped in a Suspense boundary
 export default function OnboardingPage() {
   return (
     <Suspense fallback={
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i>
+        <i className="fas fa-circle-notch fa-spin text-5xl text-indigo-600"></i>
       </div>
     }>
       <OnboardingContent />

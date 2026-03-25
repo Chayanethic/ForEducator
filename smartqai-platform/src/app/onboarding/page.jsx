@@ -77,12 +77,13 @@ function OnboardingContent() {
 
       <div className="max-w-4xl w-full relative z-10 text-center animate-in fade-in slide-in-from-bottom-8 duration-700">
         
-        <div className="w-20 h-20 bg-white text-indigo-600 rounded-[2rem] flex items-center justify-center text-4xl mx-auto mb-8 shadow-xl shadow-indigo-600/10 border border-slate-100 transform -rotate-3">
-          <i className="fas fa-brain"></i>
+        {/* --- NEW OZONE LOGO --- */}
+        <div className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-indigo-700 text-indigo-50 rounded-[2rem] flex items-center justify-center text-4xl mx-auto mb-8 shadow-xl shadow-indigo-900/30 border border-indigo-400/30 transform -rotate-3">
+          <i className="fas fa-book-open-reader"></i>
         </div>
         
         <h1 className="text-4xl md:text-5xl font-black text-slate-900 mb-4 tracking-tight">
-          Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-emerald-500">SmartQAI</span>
+          Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-500">OZONE</span>
         </h1>
         <p className="text-slate-500 mb-12 text-lg md:text-xl font-medium max-w-2xl mx-auto">
           To tailor your dashboard experience, please select how you will be using the platform today.

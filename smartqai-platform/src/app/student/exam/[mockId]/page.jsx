@@ -645,7 +645,7 @@ export default function ExamInterface() {
       {/* TOP HEADER */}
       <header className="bg-slate-900 text-white p-3 flex justify-between items-center shrink-0 shadow-md z-20">
         <div className="text-xl font-bold flex items-center gap-2">
-            <i className="fas fa-brain text-indigo-400"></i> SmartQAI
+            <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
         </div>
         <div className="text-lg font-bold tracking-wide">
             {mockDetails?.title || "Live Exam"}

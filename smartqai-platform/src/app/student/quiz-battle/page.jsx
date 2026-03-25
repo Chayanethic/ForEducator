@@ -21,7 +21,7 @@ export default function QuizBattlePage() {
       {/* STUDENT SIDEBAR */}
       <aside className="w-64 bg-slate-900 text-white flex-col hidden md:flex shrink-0">
         <Link href="/onboarding?switch=true" className="p-6 text-2xl font-black flex items-center gap-2 border-b border-slate-800 hover:text-indigo-400 transition cursor-pointer block tracking-tight">
-            <i className="fas fa-brain text-indigo-500"></i> SmartQAI
+         <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
         </Link>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
             <button onClick={() => router.push('/student')} className="w-full flex items-center gap-3 text-slate-400 hover:bg-slate-800 hover:text-white p-3 rounded-lg font-bold transition">

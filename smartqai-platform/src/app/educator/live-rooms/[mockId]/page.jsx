@@ -141,8 +141,9 @@ export default function LeaderboardPage() {
       {/* EDUCATOR SIDEBAR */}
       <aside className="w-64 bg-slate-900 text-white flex-col hidden md:flex shrink-0">
         <div className="p-6 text-2xl font-bold flex items-center gap-2 border-b border-slate-800">
-            <i className="fas fa-chalkboard-teacher text-emerald-400"></i> SmartQAI
+           <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
         </div>
+      
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
             <button onClick={() => router.push('/educator/create-mock')} className="w-full flex items-center gap-3 text-slate-400 hover:bg-slate-800 hover:text-white p-3 rounded-lg transition">
                 <i className="fas fa-file-pdf w-5"></i> AI PDF Extractor

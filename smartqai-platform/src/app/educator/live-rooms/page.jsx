@@ -149,7 +149,9 @@ export default function LiveRoomsHub() {
       {/* EDUCATOR SIDEBAR */}
       <aside className="w-64 bg-slate-900 text-white flex-col hidden md:flex shrink-0 z-10">
         <Link href="/onboarding?switch=true" className="p-6 text-2xl font-bold flex items-center gap-2 border-b border-slate-800 hover:text-emerald-400 transition cursor-pointer block">
-            <i className="fas fa-chalkboard-teacher text-emerald-400"></i> SmartQAI
+          
+           <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
+        
         </Link>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
             <button 

@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { useUser, useClerk } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
+// --- NEW: IMPORT orderBy, limit, and startAfter for Pagination ---
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, deleteDoc, orderBy, limit, startAfter } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 const CATEGORIES = ["GATE ECE", "GATE CS", "GATE EE", "GATE ME", "JEE Mains", "SSC CGL"];
@@ -14,38 +15,87 @@ export default function StudentDashboard() {
   const { signOut } = useClerk(); 
   const router = useRouter();
 
-  // --- NEW: Mobile Menu State ---
+  // --- UI & FEED STATE ---
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
   const [selectedCategory, setSelectedCategory] = useState("GATE ECE");
-
   const [publicMocks, setPublicMocks] = useState([]);
   const [activeProgress, setActiveProgress] = useState([]);
-  const [pastResults, setPastResults] = useState([]); 
   
+  // --- PAGINATION STATE FOR RECENT EXAMS ---
+  const [pastResults, setPastResults] = useState([]); 
+  const [lastVisibleDoc, setLastVisibleDoc] = useState(null);
+  const [hasMoreResults, setHasMoreResults] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
   const [joinCode, setJoinCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [isLoadingMain, setIsLoadingMain] = useState(true);
   const [isLoadingFeed, setIsLoadingFeed] = useState(true);
 
+  // --- PROFESSIONAL ALERT/TOAST SYSTEM ---
+  const [toast, setToast] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+
+  const showToast = (message, type = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  // --- ACTIVE ROADMAP & CALENDAR STATE ---
+  const [activeRoadmap, setActiveRoadmap] = useState(null);
+  const [justCompletedDay, setJustCompletedDay] = useState(null);
+
+  // --- STUDENT DEEP-DIVE MODAL STATE ---
+  const [selectedResult, setSelectedResult] = useState(null);
+  const [modalQuestions, setModalQuestions] = useState([]); 
+  const [isFetchingReport, setIsFetchingReport] = useState(false);
+  const [activeModalTab, setActiveModalTab] = useState("solutions"); 
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [diagnosticReport, setDiagnosticReport] = useState(null);
+
+  // --- CALENDAR HELPERS ---
+  const today = new Date();
+  const currentMonth = today.getMonth();
+  const currentYear = today.getFullYear();
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
   useEffect(() => {
     const fetchPersonalData = async () => {
       if (!user) return;
       try {
+        // 1. Fetch In-Progress Exams
         const progressRef = collection(db, "progress");
         const qProgress = query(progressRef, where("studentId", "==", user.id), where("isSubmitted", "==", false));
         const progressSnap = await getDocs(qProgress);
         setActiveProgress(progressSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
+        // 2. Fetch Recent Completed Exams (PAGINATED - FIRST 5 ONLY)
         const resultsRef = collection(db, "results");
-        const qResults = query(resultsRef, where("studentId", "==", user.id));
+        const qResults = query(
+          resultsRef, 
+          where("studentId", "==", user.id),
+          orderBy("submittedAt", "desc"),
+          limit(5)
+        );
         const resultsSnap = await getDocs(qResults);
+        
         let fetchedResults = resultsSnap.docs.map(d => ({ 
             id: d.id, ...d.data(), submittedDate: d.data().submittedAt?.toDate() || new Date()
         }));
-        fetchedResults.sort((a, b) => b.submittedDate - a.submittedDate);
+        
         setPastResults(fetchedResults);
+        setLastVisibleDoc(resultsSnap.docs[resultsSnap.docs.length - 1]); // Save cursor
+        if (resultsSnap.docs.length < 5) setHasMoreResults(false);
 
+        // 3. Fetch Active Roadmap
+        const rmRef = collection(db, "roadmaps");
+        const qRm = query(rmRef, where("studentId", "==", user.id));
+        const rmSnap = await getDocs(qRm);
+        if (!rmSnap.empty) {
+          setActiveRoadmap({ id: rmSnap.docs[0].id, ...rmSnap.docs[0].data() });
+        }
       } catch (error) {
         console.error("Error fetching personal data:", error);
       } finally {
@@ -55,24 +105,46 @@ export default function StudentDashboard() {
     if (isLoaded && isSignedIn) fetchPersonalData();
   }, [user, isLoaded, isSignedIn]);
 
+  // --- FETCH NEXT 5 EXAMS ---
+  const loadMoreExams = async () => {
+    if (!lastVisibleDoc) return;
+    setIsLoadingMore(true);
+    try {
+      const resultsRef = collection(db, "results");
+      const qResults = query(
+        resultsRef, 
+        where("studentId", "==", user.id),
+        orderBy("submittedAt", "desc"),
+        startAfter(lastVisibleDoc),
+        limit(5)
+      );
+      const resultsSnap = await getDocs(qResults);
+      
+      let fetchedResults = resultsSnap.docs.map(d => ({ 
+          id: d.id, ...d.data(), submittedDate: d.data().submittedAt?.toDate() || new Date()
+      }));
+      
+      setPastResults(prev => [...prev, ...fetchedResults]);
+      setLastVisibleDoc(resultsSnap.docs[resultsSnap.docs.length - 1]);
+      if (resultsSnap.docs.length < 5) setHasMoreResults(false);
+      
+    } catch (error) {
+      console.error(error);
+      showToast("Failed to load more exams.", "error");
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
   useEffect(() => {
     const fetchPublicFeed = async () => {
       setIsLoadingFeed(true);
       try {
         const mocksRef = collection(db, "mocks");
-        
-        const qPublic = query(
-          mocksRef, 
-          where("visibility", "==", "public"), 
-          where("status", "==", "published"),
-          where("examCategory", "==", selectedCategory)
-        );
-        
+        const qPublic = query(mocksRef, where("visibility", "==", "public"), where("status", "==", "published"), where("examCategory", "==", selectedCategory));
         const publicSnap = await getDocs(qPublic);
         let fetchedPublic = publicSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        
         fetchedPublic = fetchedPublic.filter(mock => !mock.isPYQ || mock.showInLiveFeed);
-        
         setPublicMocks(fetchedPublic);
       } catch (error) {
         console.error("Error fetching public feed:", error);
@@ -83,6 +155,73 @@ export default function StudentDashboard() {
     if (isLoaded) fetchPublicFeed();
   }, [selectedCategory, isLoaded]);
 
+  // --- CALENDAR LOGIC ---
+  const getRoadmapDayForDate = (targetDateObj, roadmapStartDate, timeframe) => {
+    if (!roadmapStartDate) return null;
+    const start = new Date(roadmapStartDate.toDate ? roadmapStartDate.toDate() : roadmapStartDate);
+    start.setHours(0, 0, 0, 0);
+    const target = new Date(targetDateObj);
+    target.setHours(0, 0, 0, 0);
+
+    const diffTime = target.getTime() - start.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays >= 0 && diffDays < timeframe) return diffDays + 1;
+    return null;
+  };
+
+  const toggleRoadmapDay = async (dayNumber, isToday) => {
+    if (!activeRoadmap || !activeRoadmap.plan) return;
+    
+    if (!isToday) {
+      showToast("You can only check off today's goal!", "error");
+      return;
+    }
+    
+    let newCompletedDays = [...(activeRoadmap.completedDays || [])];
+    let newStreak = activeRoadmap.streak || 0;
+
+    if (newCompletedDays.includes(dayNumber)) {
+      newCompletedDays = newCompletedDays.filter(d => d !== dayNumber);
+      newStreak = Math.max(0, newStreak - 1);
+      setJustCompletedDay(null);
+    } else {
+      newCompletedDays.push(dayNumber);
+      newStreak += 1;
+      setJustCompletedDay(dayNumber);
+      showToast("Day completed! Streak increased! 🔥");
+    }
+
+    const updatedData = { ...activeRoadmap, completedDays: newCompletedDays, streak: newStreak };
+    setActiveRoadmap(updatedData);
+
+    try {
+      await updateDoc(doc(db, "roadmaps", activeRoadmap.id), {
+        completedDays: newCompletedDays,
+        streak: newStreak
+      });
+    } catch (e) {
+      showToast("Failed to sync progress.", "error");
+    }
+  };
+
+  // --- DELETE ROADMAP (Preserves Streak) ---
+  const requestDeleteRoadmap = () => {
+    setConfirmDialog({
+      title: "End Study Plan?",
+      message: "This will clear your current roadmap. Don't worry, your overall streak will be saved securely.",
+      onConfirm: async () => {
+        try {
+          await updateDoc(doc(db, "roadmaps", activeRoadmap.id), { plan: null });
+          setActiveRoadmap({ ...activeRoadmap, plan: null });
+          showToast("Study plan ended successfully.");
+        } catch (e) {
+          showToast("Failed to clear plan.", "error");
+        }
+      }
+    });
+  };
+
   const handleJoinRoom = async (e) => {
     e.preventDefault();
     if (!joinCode.trim()) return;
@@ -91,256 +230,630 @@ export default function StudentDashboard() {
       const mockRef = doc(db, "mocks", joinCode.trim());
       const mockSnap = await getDoc(mockRef);
       if (mockSnap.exists()) router.push(`/student/exam/${joinCode.trim()}`);
-      else alert("Invalid Room ID. Please check the code and try again.");
+      else showToast("Invalid Room ID.", "error");
     } catch (error) {
-      alert("Failed to join room.");
+      showToast("Failed to join room.", "error");
     } finally {
       setIsJoining(false);
     }
   };
 
-  // Safe Navigation Handler to prevent Next.js routing errors
   const navigateTo = (path) => {
     setIsMobileMenuOpen(false);
     router.push(path);
   };
 
+  const openReportModal = async (result) => {
+    setIsFetchingReport(true);
+    setSelectedResult(result);
+    setActiveModalTab("solutions");
+    setDiagnosticReport(null);
+    try {
+      const targetExamId = result.mockId || result.examId || result.roomId || result.quizId;
+      if (targetExamId) {
+        const qRef = collection(db, "mocks", targetExamId, "questions");
+        const qSnap = await getDocs(qRef);
+        setModalQuestions(qSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } else {
+        setModalQuestions([]);
+      }
+    } catch (e) {
+      showToast("Error loading original questions.", "error");
+    } finally {
+      setIsFetchingReport(false);
+    }
+  };
+
+  const activeAnswersList = selectedResult ? (Array.isArray(selectedResult.answers) ? selectedResult.answers : Object.values(selectedResult.answers || {})) : [];
+
+  const fullExamReview = modalQuestions.length > 0 ? modalQuestions.map((q, idx) => {
+    let studentAnsRaw = null;
+    if (selectedResult && selectedResult.answers) {
+      if (Array.isArray(selectedResult.answers)) {
+        studentAnsRaw = selectedResult.answers.find(a => a && (a.questionId === q.id || a.id === q.id));
+        if (studentAnsRaw === undefined) studentAnsRaw = selectedResult.answers[idx];
+      } else if (typeof selectedResult.answers === 'object') {
+        studentAnsRaw = selectedResult.answers[q.id];
+        if (studentAnsRaw === undefined) studentAnsRaw = Object.values(selectedResult.answers)[idx];
+      }
+    }
+    let extractedAnswer = "";
+    if (studentAnsRaw !== null && studentAnsRaw !== undefined) {
+       if (typeof studentAnsRaw === 'string' || typeof studentAnsRaw === 'number') extractedAnswer = String(studentAnsRaw);
+       else if (Array.isArray(studentAnsRaw)) extractedAnswer = studentAnsRaw;
+       else if (typeof studentAnsRaw === 'object') extractedAnswer = studentAnsRaw.userAnswer ?? studentAnsRaw.selectedOption ?? studentAnsRaw.answer ?? studentAnsRaw.studentAnswer ?? "";
+    }
+    const isUnattempted = extractedAnswer === null || extractedAnswer === undefined || extractedAnswer === "" || (Array.isArray(extractedAnswer) && extractedAnswer.length === 0);
+    const correctAnsRaw = q.correctAnswer ?? q.correctOption ?? "";
+    let isCorrect = false;
+    if (studentAnsRaw && typeof studentAnsRaw.isCorrect === 'boolean') {
+      isCorrect = studentAnsRaw.isCorrect;
+    } else if (!isUnattempted) {
+      const safeUser = Array.isArray(extractedAnswer) ? extractedAnswer.map(String).sort() : [String(extractedAnswer).trim()];
+      const safeCorrect = Array.isArray(correctAnsRaw) ? correctAnsRaw.map(String).sort() : [String(correctAnsRaw).trim()];
+      isCorrect = JSON.stringify(safeUser) === JSON.stringify(safeCorrect);
+    }
+    return {
+      question: q, userAnswer: extractedAnswer, isCorrect: isCorrect, isUnattempted: isUnattempted,
+      correctAnswer: correctAnsRaw, explanation: q.explanation || "", explanationImage: q.explanationImage || null
+    };
+  }) : activeAnswersList.map(ans => ({
+      question: ans.question || ans, userAnswer: ans.userAnswer || ans.selectedOption || ans.answer || "",
+      isCorrect: ans.isCorrect, isUnattempted: !ans.userAnswer || ans.userAnswer.length === 0,
+      correctAnswer: (ans.question && ans.question.correctAnswer) || ans.correctAnswer || "N/A",
+      explanation: (ans.question && ans.question.explanation) || ans.explanation || "",
+      explanationImage: (ans.question && ans.question.explanationImage) || ans.explanationImage || null
+  }));
+
+  const generateAIDiagnostics = async () => {
+    if (!selectedResult || fullExamReview.length === 0) return;
+    setIsAnalyzing(true);
+    try {
+      const response = await fetch("/api/analyze-result", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers: fullExamReview, examTitle: selectedResult.examTitle, examCategory: selectedResult.examCategory })
+      });
+      if (!response.ok) throw new Error("Failed to fetch diagnostics.");
+      const data = await response.json();
+      if (Array.isArray(data.diagnostics)) setDiagnosticReport(data.diagnostics);
+      else throw new Error("Invalid AI Format");
+    } catch (error) {
+      showToast("AI server busy. Try again.", "error");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   const totalExams = pastResults.length;
   const avgScore = totalExams > 0 ? (pastResults.reduce((acc, curr) => acc + (curr.score || 0), 0) / totalExams).toFixed(1) : 0;
-  
   let totalCorrect = 0; let totalAttempted = 0;
   pastResults.forEach(r => { totalCorrect += (r.correct || 0); totalAttempted += (r.correct || 0) + (r.incorrect || 0); });
   const accuracy = totalAttempted > 0 ? Math.round((totalCorrect / totalAttempted) * 100) : 0;
 
-  if (!isLoaded || isLoadingMain) return <div className="flex h-screen items-center justify-center bg-slate-50"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>;
-  if (!isSignedIn) return <div className="p-10 text-center font-bold text-slate-500">Please log in to view your dashboard.</div>;
+  // Calculate current day for roadmap
+  let currentRoadmapDayIndex = -1;
+  if (activeRoadmap?.plan && activeRoadmap?.startDate) {
+    const start = new Date(activeRoadmap.startDate.toDate ? activeRoadmap.startDate.toDate() : activeRoadmap.startDate);
+    start.setHours(0, 0, 0, 0);
+    const t = new Date(); t.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((t.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays >= 0 && diffDays < activeRoadmap.timeframe) {
+      currentRoadmapDayIndex = diffDays;
+    }
+  }
+  const todaysPlan = currentRoadmapDayIndex >= 0 ? activeRoadmap?.plan?.[currentRoadmapDayIndex] : null;
+
+  if (!isLoaded || isLoadingMain) return <div className="flex h-screen items-center justify-center bg-slate-50"><i className="fas fa-circle-notch fa-spin text-4xl text-indigo-600"></i></div>;
+  if (!isSignedIn) return <div className="p-10 text-center text-sm font-bold text-slate-500">Please log in to view your dashboard.</div>;
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans relative overflow-hidden">
       
-      {/* MOBILE OVERLAY */}
-      {isMobileMenuOpen && (
-        <div 
-          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden"
-          onClick={() => setIsMobileMenuOpen(false)}
-        />
+      {/* GLOBAL TOAST NOTIFICATION */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 px-5 py-3 rounded-xl shadow-2xl z-[200] flex items-center gap-3 animate-in slide-in-from-bottom-5 text-sm font-bold text-white ${toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'}`}>
+          <i className={`fas ${toast.type === 'error' ? 'fa-exclamation-circle' : 'fa-check-circle'}`}></i>
+          {toast.message}
+        </div>
       )}
 
-      {/* RESPONSIVE STUDENT SIDEBAR */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-indigo-950 text-white flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
-        <div className="flex items-center justify-between p-6 border-b border-indigo-900">
-          <Link href="/onboarding?switch=true" className="text-2xl font-bold flex items-center gap-2 hover:text-indigo-400 transition cursor-pointer block tracking-tight">
-              <i className="fas fa-brain text-indigo-400"></i> SmartQAI
-          </Link>
-          <button className="md:hidden text-indigo-300 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}>
-            <i className="fas fa-times text-xl"></i>
-          </button>
+      {/* CONFIRMATION MODAL */}
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95">
+              <h3 className="text-lg font-black text-slate-800 mb-2">{confirmDialog.title}</h3>
+              <p className="text-xs font-medium text-slate-500 mb-6 leading-relaxed">{confirmDialog.message}</p>
+              <div className="flex gap-3 justify-end">
+                 <button onClick={() => setConfirmDialog(null)} className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg transition">Cancel</button>
+                 <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="px-4 py-2 text-xs font-bold text-white bg-rose-500 hover:bg-rose-600 rounded-lg transition shadow-md">Confirm</button>
+              </div>
+           </div>
         </div>
+      )}
 
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-            <button onClick={() => navigateTo('/student')} className="w-full flex items-center text-left gap-3 bg-indigo-800 text-white p-3 rounded-lg font-medium border-l-4 border-indigo-400 shadow-inner">
-                <i className="fas fa-home w-5"></i> Dashboard
+      {/* LOADING OVERLAY */}
+      {isFetchingReport && (
+        <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center">
+           <i className="fas fa-spinner fa-spin text-3xl text-white"></i>
+        </div>
+      )}
+
+      {/* STUDENT DEEP-DIVE MODAL */}
+      {selectedResult && !isFetchingReport && (
+        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex justify-center p-4 md:p-6 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl my-auto overflow-hidden flex flex-col max-h-[90vh] border border-slate-300">
+            <div className="bg-slate-900 p-5 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-3 text-white">
+                <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-lg shadow-md"><i className="fas fa-file-alt"></i></div>
+                <div>
+                  <h2 className="text-base font-black">{selectedResult.examTitle} - Report</h2>
+                  <p className="text-xs font-medium text-slate-400">Submitted {selectedResult.submittedDate?.toLocaleDateString()}</p>
+                </div>
+              </div>
+              <button onClick={() => { setSelectedResult(null); setDiagnosticReport(null); setModalQuestions([]); }} className="w-8 h-8 bg-white/10 hover:bg-rose-500 text-white rounded-full transition flex items-center justify-center shadow-sm"><i className="fas fa-times"></i></button>
+            </div>
+            <div className="bg-slate-100 p-4 flex flex-col md:flex-row justify-between items-center gap-4 border-b border-slate-200 shrink-0">
+              <div className="flex gap-2 bg-slate-200 p-1 rounded-lg">
+                 <button onClick={() => setActiveModalTab('solutions')} className={`px-4 py-1.5 rounded-md font-bold text-xs transition ${activeModalTab === 'solutions' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>Solutions</button>
+                 <button onClick={() => setActiveModalTab('diagnostics')} className={`px-4 py-1.5 rounded-md font-bold text-xs transition ${activeModalTab === 'diagnostics' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>Diagnostics</button>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                 <div className="bg-white px-4 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2"><span className="text-slate-500 text-[9px] uppercase font-black tracking-widest">Score</span><span className="text-base font-black text-indigo-700">{selectedResult.score}</span></div>
+                 <div className="bg-white px-4 py-1.5 rounded-lg border border-emerald-100 shadow-sm flex items-center gap-2"><span className="text-emerald-600 text-[9px] uppercase font-black tracking-widest">Accuracy</span><span className="text-base font-black text-emerald-700">{Math.round((selectedResult.correct / ((selectedResult.correct || 0) + (selectedResult.incorrect || 0))) * 100) || 0}%</span></div>
+              </div>
+            </div>
+
+            <div className="p-5 overflow-y-auto flex-1 bg-slate-50">
+              {activeModalTab === 'solutions' && (
+                <div className="space-y-4 animate-in fade-in max-w-4xl mx-auto">
+                  {fullExamReview.length === 0 ? <div className="text-center p-10 font-bold text-sm text-slate-500">Failed to load detailed question data.</div> : fullExamReview.map((item, idx) => {
+                    const isCorrect = item.isCorrect;
+                    const isUnattempted = item.isUnattempted;
+                    return (
+                      <div key={idx} className={`bg-white border-2 rounded-xl p-5 shadow-sm ${isCorrect ? 'border-emerald-200' : isUnattempted ? 'border-slate-200' : 'border-rose-300'}`}>
+                        <div className="flex items-center justify-between mb-3 pb-3 border-b border-slate-100">
+                          <div className="flex items-center gap-2">
+                            <span className="bg-slate-800 text-white text-[10px] font-black px-2 py-1 rounded">Q{idx + 1}</span>
+                            {isCorrect ? <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider"><i className="fas fa-check mr-1"></i> Correct</span> : isUnattempted ? <span className="bg-slate-100 text-slate-600 text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider"><i className="fas fa-minus mr-1"></i> Unattempted</span> : <span className="bg-rose-100 text-rose-800 text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider"><i className="fas fa-times mr-1"></i> Incorrect</span>}
+                          </div>
+                          <div className="text-xs font-black text-slate-400">{isCorrect ? `+${item.question?.marks || 2}` : isUnattempted ? `0` : `-${item.question?.negativeMarks || 0.66}`} Marks</div>
+                        </div>
+                        <p className="text-slate-800 font-bold mb-4 text-sm whitespace-pre-wrap">{item.question?.text || "Missing text"}</p>
+                        
+                        {item.question?.type === 'NAT' ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200"><div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Your Answer</div><div className={`text-sm font-black ${isUnattempted ? 'text-slate-400' : isCorrect ? 'text-emerald-600' : 'text-rose-600'}`}>{isUnattempted ? "Not Answered" : Array.isArray(item.userAnswer) ? item.userAnswer.join(", ") : String(item.userAnswer)}</div></div>
+                              <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200 shadow-sm"><div className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">Correct Answer</div><div className="text-sm font-black text-emerald-700">{Array.isArray(item.correctAnswer) ? item.correctAnswer.join(", ") : String(item.correctAnswer)}</div></div>
+                            </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                            {(item.question?.options || []).map((opt, optIndex) => {
+                               const correctArr = Array.isArray(item.correctAnswer) ? item.correctAnswer.map(String) : [String(item.correctAnswer)];
+                               const userArr = Array.isArray(item.userAnswer) ? item.userAnswer.map(String) : [String(item.userAnswer)];
+                               const isCorrectOption = correctArr.includes(String(opt.id));
+                               const isUserSelected = userArr.includes(String(opt.id));
+                               let borderClass = "border-slate-200 bg-slate-50"; let icon = null;
+                               if (isCorrectOption) { borderClass = "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-200 shadow-sm"; icon = <i className="fas fa-check-circle text-emerald-500 text-lg"></i>; } 
+                               else if (isUserSelected && !isCorrectOption) { borderClass = "border-rose-500 bg-rose-50 ring-1 ring-rose-200 shadow-sm"; icon = <i className="fas fa-times-circle text-rose-500 text-lg"></i>; }
+                               return (
+                                 <div key={optIndex} className={`flex items-start gap-3 p-3 rounded-lg border transition ${borderClass}`}>
+                                   <div className={`w-6 h-6 rounded flex items-center justify-center text-xs font-black shrink-0 ${isCorrectOption ? 'bg-emerald-500 text-white' : isUserSelected ? 'bg-rose-500 text-white' : 'bg-slate-200 text-slate-700'}`}>{opt.id}</div>
+                                   <div className="flex-1"><div className={`text-xs font-bold ${isCorrectOption ? 'text-emerald-900' : isUserSelected ? 'text-rose-900' : 'text-slate-800'}`}>{opt.text}</div></div>
+                                   {icon}
+                                 </div>
+                               )
+                            })}
+                          </div>
+                        )}
+                        {(item.explanation || item.explanationImage) && (
+                          <div className="bg-indigo-50/50 p-4 rounded-lg border border-indigo-100 mt-4">
+                            <h4 className="text-[10px] font-black text-indigo-800 uppercase tracking-wider mb-1.5 flex items-center gap-1.5"><i className="fas fa-lightbulb text-amber-500"></i> Official Solution</h4>
+                            {item.explanation && <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap">{item.explanation}</p>}
+                            {item.explanationImage && <img src={item.explanationImage} alt="Solution Diagram" className="mt-3 max-h-48 rounded border border-indigo-200 bg-white p-1 object-contain" />}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {activeModalTab === 'diagnostics' && (
+                <div className="animate-in fade-in max-w-4xl mx-auto">
+                  {!diagnosticReport && !isAnalyzing ? (
+                    <div className="bg-white p-10 rounded-2xl border border-slate-200 shadow-sm text-center">
+                      <div className="w-16 h-16 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center text-2xl mx-auto mb-4"><i className="fas fa-brain"></i></div>
+                      <h2 className="text-lg font-black text-slate-900 mb-2">Analyze Strongest & Weaknesses</h2>
+                      <button onClick={generateAIDiagnostics} className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-black hover:bg-indigo-700 transition shadow-md text-sm mt-3">Run AI Analysis <i className="fas fa-arrow-right ml-1"></i></button>
+                    </div>
+                  ) : isAnalyzing ? (
+                    <div className="bg-white p-12 rounded-2xl border border-slate-200 shadow-sm text-center"><i className="fas fa-cog fa-spin text-4xl text-indigo-600 mb-4"></i><h2 className="text-sm font-black text-slate-900">Scanning Responses...</h2></div>
+                  ) : (
+                    <div className="space-y-4">
+                      {diagnosticReport.map((item, i) => (
+                        <div key={i} className={`p-4 rounded-xl border ${item.color === 'rose' ? 'bg-rose-50/30 border-rose-100' : item.color === 'amber' ? 'bg-amber-50/30 border-amber-100' : 'bg-emerald-50/30 border-emerald-100'}`}>
+                          <div className="flex justify-between items-end mb-2"><h3 className="font-black text-slate-900 text-sm">{item.name}</h3><span className={`font-black text-lg ${item.color === 'rose' ? 'text-rose-600' : item.color === 'amber' ? 'text-amber-500' : 'text-emerald-600'}`}>{item.score}%</span></div>
+                          <div className="w-full bg-slate-200 h-1.5 rounded-full mb-3 overflow-hidden"><div className={`h-full rounded-full ${item.color === 'rose' ? 'bg-rose-500' : item.color === 'amber' ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${item.score}%` }}></div></div>
+                          <div className="text-[10px] font-bold text-slate-600">{item.weakness !== "None" ? `Review: ${item.weakness}` : "No immediate review needed."}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MOBILE MENU OVERLAY */}
+      {isMobileMenuOpen && ( <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)} /> )}
+
+      {/* STUDENT SIDEBAR */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-indigo-950 text-white flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
+        <div className="flex items-center justify-between p-5 border-b border-indigo-900">
+          <Link href="/onboarding?switch=true" className="text-xl font-black flex items-center gap-2 hover:text-indigo-400 transition cursor-pointer tracking-tight">
+              <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
+          </Link>
+          <button className="md:hidden text-indigo-300 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}><i className="fas fa-times text-lg"></i></button>
+        </div>
+        <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
+            <button onClick={() => navigateTo('/student')} className="w-full flex items-center text-left gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-indigo-400 shadow-inner">
+                <i className="fas fa-home w-4"></i> Dashboard
             </button>
-            <button onClick={() => navigateTo('/student/pyq')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 p-3 rounded-lg transition">
-                <i className="fas fa-book-open w-5"></i> PYQ Practice
+            <button onClick={() => navigateTo('/student/pyq')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
+                <i className="fas fa-book-open w-4"></i> PYQ Practice
             </button>
-            <button onClick={() => navigateTo('#')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 p-3 rounded-lg transition">
-                <i className="fas fa-chart-pie w-5"></i> Analytics & Roadmaps
+            <button onClick={() => navigateTo('/student/planner')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
+                <i className="fas fa-calendar-check w-4"></i> Study Planner
             </button>
-            <button onClick={() => navigateTo('#')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 p-3 rounded-lg transition">
-                <i className="fas fa-history w-5"></i> Past Results
-            </button>
-            <button onClick={() => navigateTo('/student/quiz-battle')} className="w-full flex items-center text-left gap-3 text-slate-400 hover:bg-slate-800 hover:text-white p-3 rounded-lg font-bold transition group">
-                <i className="fas fa-gamepad w-5 text-rose-400 group-hover:animate-bounce"></i> Quiz Battle
+            <button onClick={() => {router.push('/student/quiz-battle'); setIsMobileMenuOpen(false);}} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
+                <i className="fas fa-gamepad w-4 text-rose-400 group-hover:animate-bounce"></i> Quiz Battle
             </button>
         </nav>
-        
-        <div className="p-4 border-t border-indigo-900 bg-indigo-900/30 space-y-2">
-            <div className="flex items-center gap-3 p-3 bg-indigo-950/50 rounded-lg border border-indigo-800/50 shadow-inner">
-                <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=User"} alt="Avatar" className="w-8 h-8 rounded-full border border-indigo-700" />
-                <div className="text-sm font-medium truncate flex-1 text-indigo-100">{user?.fullName || "Account"}</div>
+        <div className="p-3 border-t border-indigo-900 bg-indigo-900/30 space-y-1.5">
+            <div className="flex items-center gap-2.5 p-2.5 bg-indigo-950/50 rounded-xl border border-indigo-800/50 shadow-inner">
+                <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=User"} alt="Avatar" className="w-7 h-7 rounded-full border border-indigo-700" />
+                <div className="text-xs font-bold truncate flex-1 text-indigo-100">{user?.fullName || "Account"}</div>
             </div>
-            <button onClick={() => navigateTo('/onboarding?switch=true')} className="w-full flex items-center justify-center gap-2 text-indigo-300 hover:bg-indigo-800 hover:text-white p-2.5 rounded-lg transition text-sm font-bold border border-transparent hover:border-indigo-700 shadow-sm">
+            <button onClick={() => router.push('/onboarding?switch=true')} className="w-full flex items-center justify-center gap-2 text-indigo-300 hover:bg-indigo-800 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-transparent hover:border-indigo-700 shadow-sm">
                 <i className="fas fa-exchange-alt"></i> Switch Role
             </button>
-            <button onClick={() => signOut({ redirectUrl: '/' })} className="w-full flex items-center justify-center gap-2 text-rose-400 hover:bg-rose-600 hover:text-white p-2.5 rounded-lg transition text-sm font-bold border border-rose-900/50 hover:border-rose-500 bg-rose-950/20 shadow-sm">
+            <button onClick={() => signOut({ redirectUrl: '/' })} className="w-full flex items-center justify-center gap-2 text-rose-400 hover:bg-rose-600 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-rose-900/50 hover:border-rose-500 bg-rose-950/20 shadow-sm">
                 <i className="fas fa-sign-out-alt"></i> Log Out
             </button>
         </div>
       </aside>
 
-      {/* MAIN CONTENT */}
-      <main className="flex-1 flex flex-col overflow-y-auto w-full">
+      <main className="flex-1 flex flex-col overflow-y-auto w-full bg-slate-50">
         
-        {/* RESPONSIVE HEADER */}
-        <header className="bg-white shadow-sm p-4 md:p-6 flex justify-between items-center z-10 sticky top-0">
-          <div className="flex items-center gap-4">
+        <header className="bg-white shadow-sm p-4 md:p-5 flex justify-between items-center z-10 sticky top-0">
+          <div className="flex items-center gap-3">
             <button className="md:hidden text-slate-600 hover:text-indigo-600 transition" onClick={() => setIsMobileMenuOpen(true)}>
-              <i className="fas fa-bars text-2xl"></i>
+              <i className="fas fa-bars text-xl"></i>
             </button>
             <div>
-              <h1 className="text-xl md:text-2xl font-bold text-slate-800">Welcome back, {user?.firstName || "Student"}!</h1>
-              <p className="text-xs md:text-sm text-slate-500 hidden sm:block">Let's continue your preparation.</p>
+              <h1 className="text-lg md:text-xl font-black text-slate-800">Welcome, {user?.firstName || "Student"}!</h1>
+              <p className="text-[10px] md:text-xs font-bold text-slate-500 hidden sm:block">Let's dominate your prep today.</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-             <div className="text-xs md:text-sm font-bold text-slate-600 border border-slate-200 px-3 py-2 md:px-4 md:py-2 rounded-lg bg-slate-50 whitespace-nowrap">
-               <i className="fas fa-fire text-orange-500 mr-1"></i> {totalExams} <span className="hidden sm:inline">Exams Taken</span>
+
+          <div className="flex items-center gap-3">
+             {activeRoadmap?.streak !== undefined && (
+               <div className="bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-2">
+                 <i className="fas fa-fire text-rose-500 text-lg"></i>
+                 <div className="flex flex-col">
+                   <span className="text-[8px] font-black text-rose-400 uppercase tracking-widest leading-none">Overall Streak</span>
+                   <span className="text-sm font-black text-rose-600 leading-tight">{activeRoadmap.streak} Days</span>
+                 </div>
+               </div>
+             )}
+             <div className="text-[10px] md:text-xs font-bold text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg bg-slate-50 shadow-sm flex items-center">
+               <i className="fas fa-layer-group text-indigo-500 mr-1.5"></i> {totalExams} <span className="hidden sm:inline ml-1">Exams Taken</span>
              </div>
           </div>
         </header>
 
-        <div className="p-4 md:p-6 lg:p-8 space-y-6 md:space-y-8 max-w-6xl mx-auto w-full">
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* --- MAIN STRUCTURED 2-COLUMN DASHBOARD --- */}
+        <div className="p-4 md:p-5 lg:p-6 max-w-7xl mx-auto w-full">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6">
             
-            <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-6 rounded-2xl shadow-md text-white lg:col-span-2 relative overflow-hidden">
-              <div className="absolute -right-10 -top-10 opacity-10 pointer-events-none"><i className="fas fa-door-open text-9xl"></i></div>
-              <h2 className="text-xl font-bold mb-2 relative z-10">Join a Private Mock</h2>
-              <p className="text-indigo-200 text-sm mb-6 relative z-10 max-w-sm">Enter the Room ID provided by your educator to join a live or scheduled exam.</p>
+            {/* LEFT COLUMN: Main Content (8 spans) */}
+            <div className="lg:col-span-8 space-y-5 lg:space-y-6">
               
-              <form onSubmit={handleJoinRoom} className="flex flex-col sm:flex-row gap-3 relative z-10">
-                <input type="text" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="e.g. 8xV9-2mB" className="flex-1 bg-white/10 border border-indigo-400/50 rounded-xl p-3 text-white placeholder-indigo-300 outline-none focus:bg-white/20 transition font-mono tracking-wider" required />
-                <button type="submit" disabled={isJoining} className="w-full sm:w-auto bg-white text-indigo-700 px-6 py-3 rounded-xl font-bold hover:bg-indigo-50 transition shadow-sm disabled:opacity-70 flex items-center justify-center gap-2">
-                  {isJoining ? "Joining..." : "Enter Room"} <i className="fas fa-arrow-right"></i>
-                </button>
-              </form>
+              {/* JOIN PRIVATE MOCK (BANNER) */}
+              <div className="bg-gradient-to-r from-indigo-600 to-blue-700 p-5 md:p-6 rounded-2xl shadow-sm text-white relative overflow-hidden">
+                <div className="absolute -right-6 -top-10 opacity-10 pointer-events-none"><i className="fas fa-door-open text-9xl"></i></div>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+                  <div>
+                    <h2 className="text-lg font-black mb-1"><i className="fas fa-link text-indigo-300 mr-2"></i> Join a Private Mock</h2>
+                    <p className="text-indigo-100 text-xs font-medium max-w-sm">Enter the Room ID provided by your educator to join a scheduled exam.</p>
+                  </div>
+                  <form onSubmit={handleJoinRoom} className="flex gap-2 w-full md:w-auto">
+                    <input type="text" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="e.g. 8xV9-2mB" className="w-full md:w-48 bg-white/10 border border-white/20 rounded-lg p-2.5 text-white placeholder-indigo-200 outline-none focus:bg-white/20 transition font-mono text-xs font-bold shadow-inner" required />
+                    <button type="submit" disabled={isJoining} className="bg-white text-indigo-700 px-4 py-2.5 rounded-lg font-black hover:bg-indigo-50 transition shadow-sm disabled:opacity-70 flex items-center justify-center gap-1.5 text-xs shrink-0">{isJoining ? "..." : "Join"} <i className="fas fa-arrow-right"></i></button>
+                  </form>
+                </div>
+              </div>
+
+              {/* IN-PROGRESS EXAMS */}
+              {activeProgress.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span></div>
+                    <h2 className="text-base font-black text-slate-900 tracking-tight">In-Progress Exams</h2>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {activeProgress.map((prog) => (
+                      <div key={prog.id} className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm relative overflow-hidden group hover:shadow-md hover:border-amber-400 transition">
+                        <div className="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider border border-amber-200">Resumable</span>
+                          <span className="text-[10px] font-black text-slate-500 font-mono bg-slate-100 px-1.5 py-0.5 rounded"><i className="fas fa-clock text-amber-500 mr-1"></i> {Math.floor(prog.timeLeft / 60)}m left</span>
+                        </div>
+                        <h3 className="font-bold text-slate-900 mt-1 mb-4 truncate text-sm">{prog.mockTitle || "Live Mock Exam"}</h3>
+                        <button onClick={() => router.push(`/student/exam/${prog.mockId}`)} className="w-full bg-slate-900 text-white py-2 rounded-lg text-xs font-black hover:bg-indigo-600 transition shadow-sm flex items-center justify-center gap-1.5">Resume Exam <i className="fas fa-play text-[10px]"></i></button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* LIVE PUBLIC FEED */}
+              <div>
+                <div className="flex flex-col md:flex-row md:items-center justify-between mb-3 gap-2">
+                  <h2 className="text-base font-black text-slate-900 tracking-tight"><i className="fas fa-globe-americas text-indigo-500 mr-1.5"></i> Live Public Feed</h2>
+                  <div className="relative w-full md:w-auto">
+                    <select 
+                      value={selectedCategory} 
+                      onChange={(e) => setSelectedCategory(e.target.value)} 
+                      className="appearance-none w-full bg-white border border-slate-200 text-slate-700 text-xs font-bold py-2 pl-3 pr-8 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-sm cursor-pointer transition-all"
+                    >
+                      {CATEGORIES.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                    </select>
+                    <i className="fas fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] pointer-events-none"></i>
+                  </div>
+                </div>
+                
+                {isLoadingFeed ? (
+                  <div className="py-10 text-center"><i className="fas fa-circle-notch fa-spin text-2xl text-indigo-400"></i></div>
+                ) : publicMocks.length === 0 ? (
+                  <div className="bg-white p-8 rounded-xl border border-slate-200 text-center text-slate-500 shadow-sm">
+                    <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-2 border border-slate-100"><i className="fas fa-folder-open text-xl text-slate-400"></i></div>
+                    <h3 className="text-sm font-black text-slate-800 mb-1">No public exams found</h3>
+                    <p className="font-medium text-[10px]">No active exams for <strong className="text-indigo-600">{selectedCategory}</strong> right now.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {publicMocks.map((mock) => (
+                      <div key={mock.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-indigo-400 hover:shadow-md transition-all flex flex-col h-full relative overflow-hidden group">
+                        {mock.isPYQ && <div className="absolute top-3 right-3 bg-rose-100 text-rose-800 text-[8px] uppercase font-black px-2 py-0.5 rounded shadow-sm border border-rose-200"><i className="fas fa-star text-rose-500 mr-1"></i> Official PYQ</div>}
+                        <div className="flex-1">
+                          <div className="flex justify-between items-start mb-3">
+                            <span className="bg-emerald-100 text-emerald-800 text-[8px] uppercase tracking-widest font-black px-2 py-0.5 rounded border border-emerald-200">Live</span>
+                            <span className="text-[10px] font-bold text-slate-500 mt-0.5 bg-slate-100 px-1.5 py-0.5 rounded"><i className="fas fa-clock mr-1 text-slate-400"></i> {mock.duration}m</span>
+                          </div>
+                          <h3 className="font-black text-slate-900 text-sm mb-1.5 leading-tight pr-10 group-hover:text-indigo-600 transition-colors">{mock.title}</h3>
+                          <p className="text-[10px] font-bold text-slate-500 mb-4 flex items-center gap-1"><i className="fas fa-user-circle text-slate-400"></i> By {mock.educatorName || "Platform Educator"}</p>
+                        </div>
+                        <button onClick={() => router.push(`/student/exam/${mock.id}`)} className="w-full bg-indigo-50 text-indigo-700 border border-indigo-200 py-2 rounded-lg text-xs font-black hover:bg-indigo-600 hover:text-white transition shadow-sm">Start Mock Test</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* PAST RESULTS (PAGINATED) */}
+              <div>
+                <h2 className="text-base font-black text-slate-900 mb-3 tracking-tight"><i className="fas fa-history text-slate-400 mr-1.5"></i> Exam History</h2>
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  
+                  {pastResults.length === 0 && !isLoadingMore ? (
+                    <div className="p-8 text-center">
+                      <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3 border border-slate-100">
+                        <i className="fas fa-clipboard-list text-xl text-slate-400"></i>
+                      </div>
+                      <h3 className="text-sm font-black text-slate-800 mb-1">No completed exams yet</h3>
+                      <p className="text-xs font-medium text-slate-500">Take your first mock test to start tracking your progress here.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="overflow-x-auto scrollbar-hide">
+                        <table className="w-full text-left min-w-[600px]">
+                          <thead>
+                            <tr className="bg-slate-50 text-slate-400 text-[9px] uppercase tracking-widest font-black border-b border-slate-100">
+                              <th className="p-4 pl-5">Exam Title</th>
+                              <th className="p-4 text-center">Date</th>
+                              <th className="p-4 text-center">Score</th>
+                              <th className="p-4 text-center">Accuracy</th>
+                              <th className="p-4 text-right pr-5">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {pastResults.map((result) => {
+                               const resultAccuracy = (result.correct + result.incorrect) > 0 ? Math.round((result.correct / (result.correct + result.incorrect)) * 100) : 0;
+                               return (
+                                <tr key={result.id} className="hover:bg-indigo-50/30 transition-colors group">
+                                  <td className="p-4 pl-5">
+                                    <div className="font-bold text-slate-900 text-xs group-hover:text-indigo-700 transition-colors">{result.examTitle || "Mock Exam"}</div>
+                                    <div className="text-[9px] font-bold text-slate-400 mt-0.5">{result.examCategory || "General"}</div>
+                                  </td>
+                                  <td className="p-4 text-center text-[10px] font-bold text-slate-500">
+                                    {result.submittedDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                  </td>
+                                  <td className="p-4 text-center font-black text-indigo-600 text-sm">{result.score}</td>
+                                  <td className="p-4 text-center">
+                                    <span className={`px-2 py-0.5 rounded text-[9px] font-black border ${resultAccuracy >= 75 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : resultAccuracy >= 50 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                                      {resultAccuracy}%
+                                    </span>
+                                  </td>
+                                  <td className="p-4 text-right pr-5">
+                                    <button onClick={() => openReportModal(result)} className="text-[10px] bg-white border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-black hover:bg-slate-50 hover:border-indigo-300 transition shadow-sm hover:text-indigo-600">
+                                      View Report
+                                    </button>
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      
+                      {/* LOAD MORE BUTTON */}
+                      {hasMoreResults && (
+                        <div className="p-3 border-t border-slate-100 bg-slate-50 flex justify-center">
+                          <button 
+                            onClick={loadMoreExams} 
+                            disabled={isLoadingMore}
+                            className="text-[10px] font-black text-indigo-600 bg-indigo-50/50 border border-indigo-100 px-4 py-2 rounded-lg hover:bg-indigo-100 transition shadow-sm disabled:opacity-50 flex items-center gap-2"
+                          >
+                            {isLoadingMore ? <><i className="fas fa-circle-notch fa-spin"></i> Loading...</> : "Show Next 5 Exams"}
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
             </div>
 
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wide mb-4">Overall Performance</h3>
-                <div className="flex justify-between items-end mb-4 border-b border-slate-100 pb-4">
-                  <div>
-                    <div className="text-xs text-slate-400 font-bold mb-1">Avg Score</div>
-                    <div className="text-2xl font-black text-slate-800">{avgScore}</div>
+            {/* RIGHT COLUMN: Sidebar (4 spans) */}
+            <div className="lg:col-span-4 space-y-5 lg:space-y-6">
+              
+              {/* --- ACTIVE ROADMAP WIDGET --- */}
+              {activeRoadmap && activeRoadmap.plan ? (
+                <div className="bg-gradient-to-br from-slate-900 to-indigo-950 rounded-2xl p-5 shadow-xl relative overflow-hidden flex flex-col text-white animate-in zoom-in-95 border border-slate-800">
+                  <div className="absolute right-0 top-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                  
+                  <div className="flex items-start justify-between gap-2 relative z-10 mb-4">
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="bg-emerald-500 text-white text-[8px] uppercase font-black px-1.5 py-0.5 rounded tracking-widest">Active</span>
+                        <span className="text-indigo-300 font-bold text-[9px]">{activeRoadmap.exam}</span>
+                      </div>
+                      <h2 className="text-base font-black leading-tight">{activeRoadmap.timeframe}-Day Plan</h2>
+                    </div>
+                    <button onClick={requestDeleteRoadmap} className="w-7 h-7 rounded-md bg-slate-800 hover:bg-rose-500 text-slate-400 hover:text-white transition flex items-center justify-center border border-slate-700 hover:border-rose-400 shadow-sm shrink-0" title="End Roadmap">
+                      <i className="fas fa-trash-alt text-[10px]"></i>
+                    </button>
                   </div>
-                  <div className="text-right">
-                    <div className="text-xs text-slate-400 font-bold mb-1">Accuracy</div>
+
+                  {/* Today's Focus Card */}
+                  {todaysPlan ? (
+                    <div className="bg-white/5 backdrop-blur-md border border-white/10 p-3.5 rounded-xl mb-4 relative z-10 shadow-sm">
+                      <h4 className="text-[8px] font-black text-indigo-300 uppercase tracking-widest mb-1.5 flex items-center gap-1"><i className="far fa-calendar-check text-emerald-400"></i> Day {todaysPlan.day} Focus</h4>
+                      <p className="font-bold text-white text-sm leading-tight mb-1">{todaysPlan.theme}</p>
+                      <p className="text-[10px] text-slate-300 font-medium leading-snug mb-3">{todaysPlan.studyFocus}</p>
+                      <button onClick={() => router.push('/student/planner')} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white font-black py-1.5 rounded-lg transition shadow-sm text-[10px]">
+                        Open Planner
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="bg-emerald-500/20 border border-emerald-500/30 p-3 rounded-xl mb-4 relative z-10 text-center shadow-inner">
+                      <h4 className="font-black text-emerald-400 text-xs mb-0.5"><i className="fas fa-trophy mr-1"></i>Completed!</h4>
+                    </div>
+                  )}
+
+                  {/* COMPACT CALENDAR WIDGET */}
+                  <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 relative z-10 shadow-inner">
+                    <div className="flex justify-between items-center mb-3">
+                      <h3 className="font-black text-indigo-100 text-xs"><i className="far fa-calendar-alt mr-1.5 text-indigo-400"></i> {monthNames[currentMonth]} {currentYear}</h3>
+                      <div className="text-[8px] font-black bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1">
+                        <i className="fas fa-check-circle"></i> {activeRoadmap.completedDays?.length || 0} / {activeRoadmap.timeframe}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-1 text-center mb-1.5">
+                      {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
+                        <div key={day} className="text-[8px] font-black text-indigo-300/50 uppercase tracking-widest">{day}</div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-1">
+                      {Array.from({ length: firstDayOfMonth }).map((_, i) => (
+                        <div key={`empty-${i}`} className="h-7"></div>
+                      ))}
+                      
+                      {Array.from({ length: daysInMonth }).map((_, i) => {
+                        const dateNum = i + 1;
+                        const currentDateObj = new Date(currentYear, currentMonth, dateNum);
+                        currentDateObj.setHours(0,0,0,0);
+                        
+                        const isTodayDate = dateNum === today.getDate() && currentMonth === today.getMonth() && currentYear === today.getFullYear();
+                        const roadmapDayNum = getRoadmapDayForDate(currentDateObj, activeRoadmap.startDate, activeRoadmap.timeframe);
+                        const isCompleted = roadmapDayNum && activeRoadmap.completedDays?.includes(roadmapDayNum);
+                        
+                        const todayObj = new Date(); todayObj.setHours(0,0,0,0);
+                        const isMissed = roadmapDayNum && !isCompleted && currentDateObj < todayObj;
+
+                        let cellClass = "h-7 rounded flex items-center justify-center font-black transition-all relative select-none ";
+                        let content = <span className="text-[10px]">{dateNum}</span>;
+
+                        if (roadmapDayNum) {
+                          if (isCompleted) {
+                            cellClass += "bg-rose-500/20 border border-rose-500/50 text-rose-400 cursor-pointer hover:bg-rose-500/30";
+                            content = <i className={`fas fa-fire text-[11px] ${justCompletedDay === roadmapDayNum ? 'animate-bounce text-rose-500 scale-125' : ''}`}></i>;
+                          } else if (isTodayDate) {
+                            cellClass += "bg-indigo-500 border border-indigo-400 text-white cursor-pointer hover:bg-indigo-400 z-10 shadow-sm";
+                            content = <span className="text-[10px]">D{roadmapDayNum}</span>;
+                          } else if (isMissed) {
+                            cellClass += "bg-slate-800/80 border border-slate-700/80 text-slate-500";
+                            content = <span className="text-[9px] opacity-50 line-through">D{roadmapDayNum}</span>;
+                          } else {
+                            cellClass += "bg-white/5 border border-white/10 text-indigo-200/50 cursor-not-allowed";
+                            content = <span className="text-[9px]">D{roadmapDayNum}</span>;
+                          }
+                        } else {
+                          if (isTodayDate) cellClass += "bg-white/10 border border-white/20 text-white";
+                          else cellClass += "bg-transparent border border-transparent text-slate-500/30";
+                        }
+
+                        return (
+                          <div 
+                            key={dateNum} 
+                            className={cellClass}
+                            onClick={() => {
+                               if (roadmapDayNum && (isTodayDate || isCompleted)) toggleRoadmapDay(roadmapDayNum, isTodayDate);
+                               else if (roadmapDayNum && !isTodayDate) showToast(isMissed ? "You missed this day!" : "This day hasn't unlocked yet!", "error");
+                            }}
+                            title={roadmapDayNum ? `Roadmap Day ${roadmapDayNum}` : ""}
+                          >
+                            {content}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                </div>
+              ) : (
+                <div className="bg-indigo-50 rounded-2xl p-5 border border-indigo-100 text-center shadow-sm">
+                  <div className="w-12 h-12 bg-indigo-100 text-indigo-500 rounded-full flex items-center justify-center text-xl mx-auto mb-3"><i className="fas fa-map-marked-alt"></i></div>
+                  <h3 className="text-sm font-black text-indigo-900 mb-1">No Active Roadmap</h3>
+                  <p className="text-[10px] font-medium text-indigo-700 mb-3">Generate an AI schedule to track your daily progress.</p>
+                  <button onClick={() => router.push('/student/planner')} className="w-full bg-indigo-600 text-white text-xs font-black py-2 rounded-lg hover:bg-indigo-700 transition shadow-sm">Create Plan</button>
+                </div>
+              )}
+
+              {/* PERFORMANCE STATS */}
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4"><i className="fas fa-chart-line mr-1"></i> Quick Stats</h3>
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                    <div className="text-[9px] text-slate-500 font-bold mb-0.5 uppercase tracking-wide">Avg Score</div>
+                    <div className="text-2xl font-black text-indigo-600">{avgScore}</div>
+                  </div>
+                  <div className="bg-emerald-50/50 p-3 rounded-xl border border-emerald-100 text-right">
+                    <div className="text-[9px] text-emerald-600 font-bold mb-0.5 uppercase tracking-wide">Accuracy</div>
                     <div className="text-2xl font-black text-emerald-600">{accuracy}%</div>
                   </div>
                 </div>
+                <button className="w-full text-[10px] font-black text-slate-600 bg-slate-50 py-2 rounded-lg hover:bg-slate-100 transition border border-slate-200">Full Analytics</button>
               </div>
-              <button className="w-full text-xs font-bold text-indigo-600 bg-indigo-50 py-2.5 rounded-lg hover:bg-indigo-100 transition border border-indigo-100">
-                View Full Analytics <i className="fas fa-chart-line ml-1"></i>
-              </button>
+
             </div>
+
           </div>
-
-          {activeProgress.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
-                <h2 className="text-lg font-bold text-slate-800">In-Progress Exams</h2>
-              </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                {activeProgress.map((prog) => (
-                  <div key={prog.id} className="bg-white p-5 rounded-xl border border-amber-200 shadow-sm relative overflow-hidden group hover:shadow-md transition">
-                    <div className="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded">Resumable</span>
-                      <span className="text-xs font-bold text-slate-500 font-mono">{Math.floor(prog.timeLeft / 60)}m left</span>
-                    </div>
-                    <h3 className="font-bold text-slate-800 mt-2 mb-4 truncate">{prog.mockTitle || "Live Mock Exam"}</h3>
-                    <button onClick={() => router.push(`/student/exam/${prog.mockId}`)} className="w-full bg-slate-800 text-white py-2 rounded-lg text-sm font-bold hover:bg-slate-700 transition flex items-center justify-center gap-2">
-                      Resume Exam <i className="fas fa-play text-xs"></i>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {pastResults.length > 0 && (
-            <div>
-              <h2 className="text-lg font-bold text-slate-800 mb-4"><i className="fas fa-history text-slate-400 mr-2"></i> Recent Completed Exams</h2>
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto scrollbar-hide">
-                  <table className="w-full text-left min-w-[600px]">
-                    <thead>
-                      <tr className="bg-slate-50 text-slate-500 text-[10px] md:text-xs uppercase tracking-wider font-bold border-b border-slate-200">
-                        <th className="p-4 pl-6">Exam Title</th>
-                        <th className="p-4 text-center">Date Taken</th>
-                        <th className="p-4 text-center">Score</th>
-                        <th className="p-4 text-center">Accuracy</th>
-                        <th className="p-4 text-right pr-6">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {pastResults.slice(0, 5).map((result) => {
-                         const resultAccuracy = (result.correct + result.incorrect) > 0 
-                           ? Math.round((result.correct / (result.correct + result.incorrect)) * 100) 
-                           : 0;
-                         return (
-                          <tr key={result.id} className="hover:bg-slate-50 transition">
-                            <td className="p-4 pl-6 font-bold text-slate-800 text-sm">{result.examTitle || "Mock Exam"}</td>
-                            <td className="p-4 text-center text-xs text-slate-500">{result.submittedDate.toLocaleDateString()}</td>
-                            <td className="p-4 text-center font-black text-indigo-600">{result.score}</td>
-                            <td className="p-4 text-center"><span className={`px-2 py-1 rounded text-xs font-bold ${resultAccuracy >= 75 ? 'bg-emerald-100 text-emerald-700' : resultAccuracy >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>{resultAccuracy}%</span></td>
-                            <td className="p-4 text-right pr-6"><button className="text-xs bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded font-bold hover:bg-slate-100 transition shadow-sm">View Report</button></td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div>
-            <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-3">
-              <h2 className="text-lg font-bold text-slate-800"><i className="fas fa-globe text-indigo-500 mr-2"></i> Live Public Exams</h2>
-              
-              <div className="flex overflow-x-auto pb-2 md:pb-0 gap-2 scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
-                {CATEGORIES.map((cat) => (
-                  <button 
-                    key={cat}
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold transition border ${selectedCategory === cat ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'}`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
-            </div>
-            
-            {isLoadingFeed ? (
-              <div className="py-12 text-center"><i className="fas fa-circle-notch fa-spin text-3xl text-indigo-400"></i></div>
-            ) : publicMocks.length === 0 ? (
-              <div className="bg-white p-10 rounded-2xl border border-slate-200 text-center text-slate-500 shadow-sm">
-                <i className="fas fa-folder-open text-4xl text-slate-300 mb-3"></i>
-                <p className="text-sm">No active public exams for <strong className="text-indigo-600">{selectedCategory}</strong> right now.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                {publicMocks.map((mock) => (
-                  <div key={mock.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:border-indigo-300 hover:shadow-md transition flex flex-col h-full relative overflow-hidden group">
-                    
-                    {mock.isPYQ && (
-                      <div className="absolute top-4 right-4 bg-rose-100 text-rose-700 text-[10px] uppercase font-bold px-2 py-1 rounded shadow-sm border border-rose-200">
-                        <i className="fas fa-star mr-1"></i> Featured PYQ
-                      </div>
-                    )}
-
-                    <div className="flex-1">
-                      <div className="flex justify-between items-start mb-3">
-                        <span className="bg-emerald-100 text-emerald-700 text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded">Live</span>
-                        <span className="text-xs text-slate-500 mt-1"><i className="fas fa-clock mr-1"></i> {mock.duration}m</span>
-                      </div>
-                      <h3 className="font-bold text-slate-800 text-lg mb-1 leading-tight pr-12 group-hover:text-indigo-600 transition-colors">{mock.title}</h3>
-                      <p className="text-sm text-slate-500 mb-4 truncate">By {mock.educatorName || "Platform Educator"}</p>
-                    </div>
-                    <button onClick={() => router.push(`/student/exam/${mock.id}`)} className="w-full bg-indigo-50 text-indigo-700 border border-indigo-200 py-2.5 rounded-lg text-sm font-bold hover:bg-indigo-600 hover:text-white transition">
-                      Start Exam
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
         </div>
       </main>
     </div>

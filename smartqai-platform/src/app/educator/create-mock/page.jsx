@@ -312,7 +312,9 @@ export default function CreateMockPage() {
 
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
         <div className="flex items-center justify-between p-6 border-b border-slate-800">
-          <Link href="/onboarding?switch=true" className="text-2xl font-bold flex items-center gap-2 hover:text-emerald-400 transition cursor-pointer tracking-tight"><i className="fas fa-chalkboard-teacher text-emerald-400"></i> SmartQAI</Link>
+          <Link href="/onboarding?switch=true" className="text-2xl font-bold flex items-center gap-2 hover:text-emerald-400 transition cursor-pointer tracking-tight">
+            <i className="fas fa-chalkboard-teacher text-emerald-400"></i> OZONE
+          </Link>
           <button className="md:hidden text-slate-400 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}><i className="fas fa-times text-xl"></i></button>
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">

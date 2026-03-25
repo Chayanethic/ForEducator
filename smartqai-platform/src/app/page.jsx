@@ -15,12 +15,23 @@ export default async function LandingPage() {
       {/* --- NAVBAR --- */}
       <nav className="border-b border-slate-200/50 bg-white/80 backdrop-blur-md fixed w-full z-50 top-0 transition-all">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <Link href="/" className="text-2xl font-black text-slate-900 flex items-center gap-3 tracking-tight hover:opacity-80 transition cursor-pointer">
-            <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-indigo-800 text-white rounded-xl flex items-center justify-center shadow-md shadow-indigo-600/20">
-              <i className="fas fa-brain"></i>
+          
+          {/* --- OZONE LOGO --- */}
+          <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition cursor-pointer select-none">
+            <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 w-10 h-10 rounded-xl shadow-lg shadow-indigo-900/20 border border-indigo-400/30 flex items-center justify-center shrink-0">
+                <i className="fas fa-book-open-reader text-indigo-50 text-lg"></i>
             </div>
-            SmartQAI
+            <div className="flex flex-col justify-center">
+                <span className="text-2xl font-black tracking-tight text-slate-900 leading-none mt-1">
+                    OZONE
+                </span>
+            </div>
           </Link>
+          
+          <div className="hidden md:flex items-center gap-8 text-sm font-bold text-slate-600">
+            <a href="#features" className="hover:text-indigo-600 transition">Features</a>
+            <a href="#pricing" className="hover:text-indigo-600 transition">Pricing</a>
+          </div>
           
           <div className="flex items-center gap-4 text-sm font-bold">
             {userId ? (
@@ -29,7 +40,7 @@ export default async function LandingPage() {
               </Link>
             ) : (
               <>
-                <Link href="/sign-in" className="text-slate-600 hover:text-indigo-600 transition px-4 py-2">Log in</Link>
+                <Link href="/sign-in" className="text-slate-600 hover:text-indigo-600 transition px-4 py-2 hidden sm:block">Log in</Link>
                 <Link href="/sign-up" className="bg-slate-900 text-white px-6 py-2.5 rounded-full hover:bg-indigo-600 transition-all shadow-md hover:shadow-indigo-600/30">
                   Sign up free
                 </Link>
@@ -40,8 +51,8 @@ export default async function LandingPage() {
       </nav>
 
       {/* --- HERO SECTION --- */}
-      <main className="pt-40 pb-20 px-6 relative z-10 flex-1">
-        <div className="max-w-4xl mx-auto text-center">
+      <main className="pt-40 pb-10 px-6 relative z-10 flex-1">
+        <div className="max-w-5xl mx-auto text-center">
           
           <div className="inline-flex items-center gap-2 mb-8 px-4 py-2 rounded-full bg-white border border-indigo-100 text-indigo-700 text-xs font-black tracking-wide uppercase shadow-sm">
             <span className="relative flex h-2 w-2">
@@ -59,7 +70,7 @@ export default async function LandingPage() {
           </h1>
           
           <p className="text-lg md:text-xl text-slate-600 mb-12 max-w-2xl mx-auto leading-relaxed font-medium">
-            The ultimate AI-powered platform for educators and students. Extract complex questions instantly, host strict TCS iON exam rooms, and battle your friends in real-time.
+            The Adaptive Exam & Diagnostic Engine. Extract complex questions instantly, host strict TCS iON environments, and generate deep AI performance analytics.
           </p>
           
           {!userId ? (
@@ -76,23 +87,44 @@ export default async function LandingPage() {
               Enter your Workspace <i className="fas fa-rocket"></i>
             </Link>
           )}
+
+          {/* --- TRUSTED BRANDS SECTION (FURTHER COMPRESSED) --- */}
+          <div className="mt-10 pt-8 border-t border-slate-200/60 max-w-4xl mx-auto">
+            <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-8">Trusted by the top institutions</p>
+            <div className="flex flex-wrap justify-center items-center gap-12 md:gap-24 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
+                
+                {/* JIS Group Logo */}
+                <img 
+                  src="https://res.cloudinary.com/dnpudf84r/image/upload/v1774474653/jis_p8zlvw.png" 
+                  alt="JIS Group Logo" 
+                  className="h-14 w-auto object-contain"
+                />
+
+                {/* NIT Logo */}
+                <img 
+                  src="https://res.cloudinary.com/dnpudf84r/image/upload/v1774474777/download_zfvub0.jpg" 
+                  alt="Narula Institute of Technology Logo" 
+                  className="h-14 w-auto object-contain"
+                />
+
+            </div>
+          </div>
+          
         </div>
 
-        {/* --- FEATURE CARDS GRID --- */}
-        <div id="features" className="max-w-6xl mx-auto mt-32 grid grid-cols-1 md:grid-cols-2 gap-8 scroll-mt-32">
+        {/* --- FEATURE CARDS GRID (COMPRESSED SPACING) --- */}
+        <div id="features" className="max-w-6xl mx-auto mt-10 grid grid-cols-1 md:grid-cols-2 gap-8 scroll-mt-32">
           
-          {/* Card 1: AI Extraction */}
           <div className="bg-white p-10 rounded-[2rem] border-2 border-slate-100 shadow-sm hover:shadow-2xl hover:shadow-indigo-500/10 hover:border-indigo-100 transition-all duration-300 group">
             <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-3xl mb-8 group-hover:scale-110 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300">
               <i className="fas fa-robot"></i>
             </div>
             <h3 className="text-2xl font-black text-slate-900 mb-4">AI Question Extraction</h3>
             <p className="text-slate-600 leading-relaxed text-lg font-medium">
-              Just upload your past paper PDFs. Our AI instantly parses text, detects diagrams, and categorizes MSQ, MCQ, and NAT questions flawlessly.
+              Just upload your past paper PDFs. Ozone's AI instantly parses text, detects diagrams, and categorizes MSQ, MCQ, and NAT questions flawlessly.
             </p>
           </div>
           
-          {/* Card 2: Environment */}
           <div className="bg-white p-10 rounded-[2rem] border-2 border-slate-100 shadow-sm hover:shadow-2xl hover:shadow-emerald-500/10 hover:border-emerald-100 transition-all duration-300 group relative overflow-hidden">
             <div className="absolute top-0 right-0 bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs font-black px-6 py-2 rounded-bl-2xl uppercase tracking-widest shadow-md">Strict Mode</div>
             <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center text-3xl mb-8 group-hover:scale-110 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-300">
@@ -104,18 +136,16 @@ export default async function LandingPage() {
             </p>
           </div>
 
-          {/* Card 3: Deep Analytics */}
           <div className="bg-white p-10 rounded-[2rem] border-2 border-slate-100 shadow-sm hover:shadow-2xl hover:shadow-purple-500/10 hover:border-purple-100 transition-all duration-300 group">
             <div className="w-16 h-16 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center text-3xl mb-8 group-hover:scale-110 group-hover:bg-purple-600 group-hover:text-white transition-all duration-300">
               <i className="fas fa-chart-pie"></i>
             </div>
-            <h3 className="text-2xl font-black text-slate-900 mb-4">Deep Analytics</h3>
+            <h3 className="text-2xl font-black text-slate-900 mb-4">Deep AI Analytics</h3>
             <p className="text-slate-600 leading-relaxed text-lg font-medium">
-              Educators get instant leaderboards and student-by-student analysis. Students get official AI-generated solutions targeting their weak areas.
+              Educators get instant live leaderboards. Students get official AI-generated solutions and dynamic Action Plans targeting their specific weak areas.
             </p>
           </div>
 
-          {/* Card 4: Battle Mode (NEW) */}
           <div className="bg-white p-10 rounded-[2rem] border-2 border-slate-100 shadow-sm hover:shadow-2xl hover:shadow-rose-500/10 hover:border-rose-100 transition-all duration-300 group">
             <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center text-3xl mb-8 group-hover:scale-110 group-hover:bg-rose-600 group-hover:text-white transition-all duration-300">
               <i className="fas fa-gamepad"></i>
@@ -127,6 +157,61 @@ export default async function LandingPage() {
           </div>
 
         </div>
+
+        {/* --- PRICING / SUBSCRIPTION SECTION --- */}
+        <div id="pricing" className="max-w-7xl mx-auto mt-32 scroll-mt-24">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-4 tracking-tight">Simple, transparent pricing.</h2>
+            <p className="text-lg text-slate-500 font-medium">Start for free, upgrade when you need supercharged AI limits.</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-center">
+            
+            {/* Free Tier */}
+            <div className="bg-white rounded-[2rem] p-8 border-2 border-slate-100 shadow-sm">
+              <h3 className="text-xl font-black text-slate-800 mb-2">Student Basic</h3>
+              <p className="text-slate-500 text-sm font-medium mb-6">Perfect for individual practice.</p>
+              <div className="text-5xl font-black text-slate-900 mb-6">₹0<span className="text-lg text-slate-400 font-medium">/mo</span></div>
+              <ul className="space-y-4 mb-8">
+                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-emerald-500"></i> Access to Public Live Feed</li>
+                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-emerald-500"></i> Basic Result Scorecards</li>
+                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-emerald-500"></i> Join Private Mock Rooms</li>
+                <li className="flex items-center gap-3 text-slate-400 font-medium text-sm line-through"><i className="fas fa-times"></i> AI Diagnostics & Plans</li>
+              </ul>
+              <Link href="/sign-up" className="block text-center w-full bg-slate-100 text-slate-800 font-black py-3.5 rounded-xl hover:bg-slate-200 transition">Get Started</Link>
+            </div>
+
+            {/* Pro Tier (Highlighted) */}
+            <div className="bg-slate-900 rounded-[2rem] p-8 border border-slate-800 shadow-2xl relative transform md:-translate-y-4">
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest">Most Popular</div>
+              <h3 className="text-xl font-black text-white mb-2">Ozone Pro</h3>
+              <p className="text-slate-400 text-sm font-medium mb-6">For serious learners and creators.</p>
+              <div className="text-5xl font-black text-white mb-6">₹499<span className="text-lg text-slate-500 font-medium">/mo</span></div>
+              <ul className="space-y-4 mb-8">
+                <li className="flex items-center gap-3 text-slate-200 font-bold text-sm"><i className="fas fa-check text-indigo-400"></i> Everything in Basic</li>
+                <li className="flex items-center gap-3 text-white font-black text-sm"><i className="fas fa-check text-indigo-400"></i> Unlimited AI PDF Extractions</li>
+                <li className="flex items-center gap-3 text-white font-black text-sm"><i className="fas fa-check text-indigo-400"></i> Deep AI Diagnostic Reports</li>
+                <li className="flex items-center gap-3 text-white font-black text-sm"><i className="fas fa-check text-indigo-400"></i> Host Live Exam Rooms</li>
+              </ul>
+              <Link href="/sign-up" className="block text-center w-full bg-indigo-500 text-white font-black py-3.5 rounded-xl hover:bg-indigo-400 transition shadow-lg shadow-indigo-500/25">Upgrade to Pro</Link>
+            </div>
+
+            {/* Institutional Tier */}
+            <div className="bg-white rounded-[2rem] p-8 border-2 border-slate-100 shadow-sm">
+              <h3 className="text-xl font-black text-slate-800 mb-2">Educator/Institute</h3>
+              <p className="text-slate-500 text-sm font-medium mb-6">For coaching centers and schools.</p>
+              <div className="text-5xl font-black text-slate-900 mb-6">₹1999<span className="text-lg text-slate-400 font-medium">/mo</span></div>
+              <ul className="space-y-4 mb-8">
+                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-emerald-500"></i> Everything in Pro</li>
+                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-emerald-500"></i> Unlimited Student Attendees</li>
+                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-emerald-500"></i> Export Cohort Analytics</li>
+                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-emerald-500"></i> Custom Branding (White-label)</li>
+              </ul>
+              <a href="#" className="block text-center w-full bg-slate-100 text-slate-800 font-black py-3.5 rounded-xl hover:bg-slate-200 transition">Contact Sales</a>
+            </div>
+
+          </div>
+        </div>
       </main>
 
       {/* --- BOTTOM CTA --- */}
@@ -136,7 +221,7 @@ export default async function LandingPage() {
             <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"></div>
             <h2 className="text-4xl md:text-5xl font-black text-white mb-6 tracking-tight relative z-10">Ready to ace your exams?</h2>
             <p className="text-slate-400 text-lg md:text-xl mb-10 max-w-xl mx-auto relative z-10">
-              Join thousands of students and educators building the future of test prep today.
+              Join thousands of students and educators building the future of test prep with Ozone.
             </p>
             <Link href="/sign-up" className="relative z-10 inline-block bg-white text-slate-900 text-lg font-black px-10 py-4 rounded-2xl hover:bg-indigo-50 transition transform hover:-translate-y-1 shadow-lg">
               Create your Free Account
@@ -149,10 +234,10 @@ export default async function LandingPage() {
       <footer className="border-t border-slate-200 bg-white py-10 mt-auto relative z-10">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-slate-900 font-black text-lg tracking-tight">
-            <i className="fas fa-brain text-indigo-600"></i> SmartQAI
+            <i className="fas fa-book-open-reader text-indigo-600"></i> OZONE
           </div>
           <p className="text-slate-500 font-medium text-sm">
-            © {new Date().getFullYear()} SmartQAI Platform. All rights reserved.
+            © {new Date().getFullYear()} Ozone Platform. All rights reserved.
           </p>
         </div>
       </footer>

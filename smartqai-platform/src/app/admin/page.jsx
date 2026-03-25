@@ -89,7 +89,6 @@ export default function AdminPortal() {
     
     const formData = new FormData();
     formData.append("pdf", file);
-    // --- NEW: Send toggle state to API ---
     formData.append("generateExplanations", generateExplanations);
 
     try {
@@ -296,6 +295,26 @@ export default function AdminPortal() {
   return (
     <div className="flex h-screen bg-slate-50 font-sans relative selection:bg-rose-100 selection:text-rose-900">
       
+      {/* --- NEW: AI PROCESSING OVERLAY (ADMIN THEME) --- */}
+      {isProcessing && (
+        <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md z-[100] flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="bg-white p-10 rounded-[2rem] shadow-2xl flex flex-col items-center max-w-sm w-full border border-slate-100 relative overflow-hidden">
+            <div className="absolute -top-10 -right-10 w-32 h-32 bg-rose-400/20 rounded-full blur-2xl"></div>
+            <div className="relative z-10 flex flex-col items-center">
+              <div className="relative w-24 h-24 mb-6">
+                <div className="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
+                <div className="absolute inset-0 border-4 border-rose-600 rounded-full border-t-transparent animate-spin"></div>
+                <i className="fas fa-microchip absolute inset-0 flex items-center justify-center text-3xl text-rose-600 animate-pulse"></i>
+              </div>
+              <h3 className="text-2xl font-black text-slate-900 mb-3 text-center tracking-tight">System Analyzing</h3>
+              <p className="text-slate-500 text-center font-medium text-sm leading-relaxed">
+                Extracting Official PYQ data, diagrams, and structuring JSON payload. Please do not close this window.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {publishedRoomId && (
         <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
           <div className="bg-white p-10 rounded-[2rem] shadow-2xl text-center max-w-md w-full border border-slate-100 relative overflow-hidden">
@@ -359,7 +378,7 @@ export default function AdminPortal() {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col overflow-y-auto">
+      <main className="flex-1 flex flex-col overflow-y-auto relative">
         {activeTab === "create" && (
           <>
             <header className="bg-white shadow-sm p-6 flex justify-between items-center z-10 sticky top-0">
@@ -376,7 +395,7 @@ export default function AdminPortal() {
               </button>
             </header>
 
-            <div className="p-6 md:p-8 space-y-8 max-w-5xl mx-auto w-full">
+            <div className="p-6 md:p-8 space-y-8 max-w-5xl mx-auto w-full relative z-0">
               
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center gap-6">
                 <div>
@@ -412,8 +431,6 @@ export default function AdminPortal() {
 
               {questions.length === 0 && (
                 <section className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
-                  
-                  {/* --- FIXED: The Drag & Drop Area (Strictly for the file now) --- */}
                   <label className="border-2 border-dashed border-rose-300 rounded-2xl bg-rose-50/50 hover:bg-rose-50 transition p-12 flex flex-col items-center justify-center text-center cursor-pointer group mb-8">
                     <input type="file" accept="application/pdf" className="hidden" onChange={(e) => setFile(e.target.files[0])} />
                     <div className="w-20 h-20 bg-white text-rose-600 rounded-full flex items-center justify-center text-3xl mb-4 shadow-sm group-hover:scale-110 transition-transform border border-rose-100"><i className="fas fa-file-pdf"></i></div>
@@ -421,9 +438,7 @@ export default function AdminPortal() {
                     <p className="text-sm font-medium text-slate-600">Gemini will auto-extract images, text, and options.</p>
                   </label>
 
-                  {/* --- FIXED: Controls moved OUTSIDE the label so the Checkbox is clickable! --- */}
                   <div className="flex flex-col items-center justify-center gap-6">
-                    
                     <div className="flex items-center gap-3 bg-rose-50/50 px-6 py-4 rounded-xl border border-rose-100 shadow-inner w-full max-w-lg justify-center">
                        <input 
                          type="checkbox" 
@@ -444,7 +459,6 @@ export default function AdminPortal() {
                     >
                       {isProcessing ? "AI is Analyzing..." : "Commence Extraction"}
                     </button>
-                    
                   </div>
                 </section>
               )}
@@ -597,7 +611,7 @@ export default function AdminPortal() {
         )}
 
         {activeTab === "manage" && (
-          <div className="p-6 md:p-8 max-w-5xl mx-auto w-full">
+          <div className="p-6 md:p-8 max-w-5xl mx-auto w-full relative z-0">
             <h1 className="text-2xl font-black text-slate-900 mb-8">Manage Official PYQs</h1>
             
             {isLoadingMocks ? (

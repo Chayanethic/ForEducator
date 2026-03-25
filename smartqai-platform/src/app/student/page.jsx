@@ -129,6 +129,10 @@ export default function StudentDashboard() {
             <a href="#" className="flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 p-3 rounded-lg transition">
                 <i className="fas fa-history w-5"></i> Past Results
             </a>
+            {/* NEW: QUIZ BATTLE BUTTON */}
+            <button onClick={() => router.push('/student/quiz-battle')} className="w-full flex items-center gap-3 text-slate-400 hover:bg-slate-800 hover:text-white p-3 rounded-lg font-bold transition group">
+                <i className="fas fa-gamepad w-5 text-rose-400 group-hover:animate-bounce"></i> Quiz Battle
+            </button>
         </nav>
         
         {/* --- 3. UPGRADED: BOTTOM PROFILE & LOGOUT BUTTON --- */}

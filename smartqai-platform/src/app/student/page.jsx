@@ -4,9 +4,11 @@ import { useState, useEffect } from "react";
 import { useUser, useClerk } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-// --- NEW: IMPORT orderBy, limit, and startAfter for Pagination ---
-import { collection, query, where, getDocs, doc, getDoc, updateDoc, deleteDoc, orderBy, limit, startAfter } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, limit, startAfter } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+
+// --- PRODUCT TOUR INTEGRATION ---
+import ProductTour from "@/components/ProductTour";
 
 const CATEGORIES = ["GATE ECE", "GATE CS", "GATE EE", "GATE ME", "JEE Mains", "SSC CGL"];
 
@@ -129,7 +131,6 @@ export default function StudentDashboard() {
       if (resultsSnap.docs.length < 5) setHasMoreResults(false);
       
     } catch (error) {
-      console.error(error);
       showToast("Failed to load more exams.", "error");
     } finally {
       setIsLoadingMore(false);
@@ -343,12 +344,24 @@ export default function StudentDashboard() {
   }
   const todaysPlan = currentRoadmapDayIndex >= 0 ? activeRoadmap?.plan?.[currentRoadmapDayIndex] : null;
 
-  if (!isLoaded || isLoadingMain) return <div className="flex h-screen items-center justify-center bg-slate-50"><i className="fas fa-circle-notch fa-spin text-4xl text-indigo-600"></i></div>;
+  // --- BRAND NEW OZONE LOADING SCREEN ---
+  if (!isLoaded || isLoadingMain) return (
+    <div className="flex h-screen items-center justify-center bg-slate-50 flex-col animate-in fade-in duration-500">
+      <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-indigo-700 text-indigo-50 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-xl shadow-indigo-900/30 border border-indigo-400/30 transform -rotate-3 animate-pulse">
+        <i className="fas fa-book-open-reader"></i>
+      </div>
+      <h2 className="text-xl font-black text-slate-900 tracking-tight animate-pulse">Loading Workspace...</h2>
+    </div>
+  );
+
   if (!isSignedIn) return <div className="p-10 text-center text-sm font-bold text-slate-500">Please log in to view your dashboard.</div>;
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans relative overflow-hidden">
       
+      {/* THE PRODUCT TOUR WITH USER ID */}
+      <ProductTour userId={user?.id} />
+
       {/* GLOBAL TOAST NOTIFICATION */}
       {toast && (
         <div className={`fixed bottom-6 right-6 px-5 py-3 rounded-xl shadow-2xl z-[200] flex items-center gap-3 animate-in slide-in-from-bottom-5 text-sm font-bold text-white ${toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'}`}>
@@ -378,7 +391,7 @@ export default function StudentDashboard() {
         </div>
       )}
 
-      {/* STUDENT DEEP-DIVE MODAL */}
+      {/* FULLY INTACT STUDENT DEEP-DIVE MODAL */}
       {selectedResult && !isFetchingReport && (
         <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex justify-center p-4 md:p-6 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl my-auto overflow-hidden flex flex-col max-h-[90vh] border border-slate-300">
@@ -488,7 +501,7 @@ export default function StudentDashboard() {
       {/* MOBILE MENU OVERLAY */}
       {isMobileMenuOpen && ( <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)} /> )}
 
-      {/* STUDENT SIDEBAR */}
+      {/* UPGRADED OZONE SIDEBAR WITH TOUR IDS */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-indigo-950 text-white flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
         <div className="flex items-center justify-between p-5 border-b border-indigo-900">
           <Link href="/onboarding?switch=true" className="text-xl font-black flex items-center gap-2 hover:text-indigo-400 transition cursor-pointer tracking-tight">
@@ -497,16 +510,16 @@ export default function StudentDashboard() {
           <button className="md:hidden text-indigo-300 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}><i className="fas fa-times text-lg"></i></button>
         </div>
         <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
-            <button onClick={() => navigateTo('/student')} className="w-full flex items-center text-left gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-indigo-400 shadow-inner">
+            <button onClick={() => navigateTo('/student')} className="w-full flex items-center text-left gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-emerald-400 shadow-inner">
                 <i className="fas fa-home w-4"></i> Dashboard
             </button>
-            <button onClick={() => navigateTo('/student/pyq')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
+            <button id="tour-sidebar-pyq" onClick={() => navigateTo('/student/pyq')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
                 <i className="fas fa-book-open w-4"></i> PYQ Practice
             </button>
-            <button onClick={() => navigateTo('/student/planner')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
+            <button id="tour-sidebar-planner" onClick={() => navigateTo('/student/planner')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
                 <i className="fas fa-calendar-check w-4"></i> Study Planner
             </button>
-            <button onClick={() => {router.push('/student/quiz-battle'); setIsMobileMenuOpen(false);}} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
+            <button id="tour-sidebar-quiz" onClick={() => {router.push('/student/quiz-battle'); setIsMobileMenuOpen(false);}} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
                 <i className="fas fa-gamepad w-4 text-rose-400 group-hover:animate-bounce"></i> Quiz Battle
             </button>
         </nav>
@@ -539,8 +552,8 @@ export default function StudentDashboard() {
 
           <div className="flex items-center gap-3">
              {activeRoadmap?.streak !== undefined && (
-               <div className="bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-2">
-                 <i className="fas fa-fire text-rose-500 text-lg"></i>
+               <div id="tour-streak" className="bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-2 hover:scale-105 transition-transform cursor-default">
+                 <i className="fas fa-fire text-rose-500 text-lg animate-pulse"></i>
                  <div className="flex flex-col">
                    <span className="text-[8px] font-black text-rose-400 uppercase tracking-widest leading-none">Overall Streak</span>
                    <span className="text-sm font-black text-rose-600 leading-tight">{activeRoadmap.streak} Days</span>
@@ -560,8 +573,8 @@ export default function StudentDashboard() {
             {/* LEFT COLUMN: Main Content (8 spans) */}
             <div className="lg:col-span-8 space-y-5 lg:space-y-6">
               
-              {/* JOIN PRIVATE MOCK (BANNER) */}
-              <div className="bg-gradient-to-r from-indigo-600 to-blue-700 p-5 md:p-6 rounded-2xl shadow-sm text-white relative overflow-hidden">
+              {/* JOIN PRIVATE MOCK (BANNER) WITH HOVER & TOUR ID */}
+              <div id="tour-join-room" className="bg-gradient-to-r from-indigo-600 to-purple-600 p-5 md:p-6 rounded-2xl shadow-sm hover:shadow-md transition-all text-white relative overflow-hidden">
                 <div className="absolute -right-6 -top-10 opacity-10 pointer-events-none"><i className="fas fa-door-open text-9xl"></i></div>
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
                   <div>
@@ -575,7 +588,7 @@ export default function StudentDashboard() {
                 </div>
               </div>
 
-              {/* IN-PROGRESS EXAMS */}
+              {/* IN-PROGRESS EXAMS WITH HOVER */}
               {activeProgress.length > 0 && (
                 <div>
                   <div className="flex items-center gap-2 mb-3">
@@ -584,22 +597,22 @@ export default function StudentDashboard() {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {activeProgress.map((prog) => (
-                      <div key={prog.id} className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm relative overflow-hidden group hover:shadow-md hover:border-amber-400 transition">
+                      <div key={prog.id} onClick={() => router.push(`/student/exam/${prog.mockId}`)} className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm relative overflow-hidden group hover:-translate-y-1 hover:shadow-md hover:border-amber-400 transition-all duration-200 cursor-pointer">
                         <div className="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
                         <div className="flex justify-between items-start mb-2">
                           <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider border border-amber-200">Resumable</span>
                           <span className="text-[10px] font-black text-slate-500 font-mono bg-slate-100 px-1.5 py-0.5 rounded"><i className="fas fa-clock text-amber-500 mr-1"></i> {Math.floor(prog.timeLeft / 60)}m left</span>
                         </div>
                         <h3 className="font-bold text-slate-900 mt-1 mb-4 truncate text-sm">{prog.mockTitle || "Live Mock Exam"}</h3>
-                        <button onClick={() => router.push(`/student/exam/${prog.mockId}`)} className="w-full bg-slate-900 text-white py-2 rounded-lg text-xs font-black hover:bg-indigo-600 transition shadow-sm flex items-center justify-center gap-1.5">Resume Exam <i className="fas fa-play text-[10px]"></i></button>
+                        <button className="w-full bg-slate-900 text-white py-2 rounded-lg text-xs font-black group-hover:bg-indigo-600 transition-colors shadow-sm flex items-center justify-center gap-1.5">Resume Exam <i className="fas fa-play text-[10px]"></i></button>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* LIVE PUBLIC FEED */}
-              <div>
+              {/* LIVE PUBLIC FEED WITH TOUR ID & HOVER */}
+              <div id="tour-feed">
                 <div className="flex flex-col md:flex-row md:items-center justify-between mb-3 gap-2">
                   <h2 className="text-base font-black text-slate-900 tracking-tight"><i className="fas fa-globe-americas text-indigo-500 mr-1.5"></i> Live Public Feed</h2>
                   <div className="relative w-full md:w-auto">
@@ -625,7 +638,7 @@ export default function StudentDashboard() {
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {publicMocks.map((mock) => (
-                      <div key={mock.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-indigo-400 hover:shadow-md transition-all flex flex-col h-full relative overflow-hidden group">
+                      <div key={mock.id} onClick={() => router.push(`/student/exam/${mock.id}`)} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-indigo-400 hover:-translate-y-1 hover:shadow-md transition-all duration-200 flex flex-col h-full relative overflow-hidden group cursor-pointer">
                         {mock.isPYQ && <div className="absolute top-3 right-3 bg-rose-100 text-rose-800 text-[8px] uppercase font-black px-2 py-0.5 rounded shadow-sm border border-rose-200"><i className="fas fa-star text-rose-500 mr-1"></i> Official PYQ</div>}
                         <div className="flex-1">
                           <div className="flex justify-between items-start mb-3">
@@ -635,7 +648,7 @@ export default function StudentDashboard() {
                           <h3 className="font-black text-slate-900 text-sm mb-1.5 leading-tight pr-10 group-hover:text-indigo-600 transition-colors">{mock.title}</h3>
                           <p className="text-[10px] font-bold text-slate-500 mb-4 flex items-center gap-1"><i className="fas fa-user-circle text-slate-400"></i> By {mock.educatorName || "Platform Educator"}</p>
                         </div>
-                        <button onClick={() => router.push(`/student/exam/${mock.id}`)} className="w-full bg-indigo-50 text-indigo-700 border border-indigo-200 py-2 rounded-lg text-xs font-black hover:bg-indigo-600 hover:text-white transition shadow-sm">Start Mock Test</button>
+                        <button className="w-full bg-indigo-50 text-indigo-700 border border-indigo-200 py-2 rounded-lg text-xs font-black group-hover:bg-indigo-600 group-hover:text-white transition-colors shadow-sm">Start Mock Test</button>
                       </div>
                     ))}
                   </div>
@@ -720,123 +733,125 @@ export default function StudentDashboard() {
             {/* RIGHT COLUMN: Sidebar (4 spans) */}
             <div className="lg:col-span-4 space-y-5 lg:space-y-6">
               
-              {/* --- ACTIVE ROADMAP WIDGET --- */}
-              {activeRoadmap && activeRoadmap.plan ? (
-                <div className="bg-gradient-to-br from-slate-900 to-indigo-950 rounded-2xl p-5 shadow-xl relative overflow-hidden flex flex-col text-white animate-in zoom-in-95 border border-slate-800">
-                  <div className="absolute right-0 top-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
-                  
-                  <div className="flex items-start justify-between gap-2 relative z-10 mb-4">
-                    <div>
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <span className="bg-emerald-500 text-white text-[8px] uppercase font-black px-1.5 py-0.5 rounded tracking-widest">Active</span>
-                        <span className="text-indigo-300 font-bold text-[9px]">{activeRoadmap.exam}</span>
+              {/* --- ACTIVE ROADMAP WIDGET WITH TOUR ID --- */}
+              <div id="tour-roadmap">
+                {activeRoadmap && activeRoadmap.plan ? (
+                  <div className="bg-gradient-to-br from-slate-900 to-indigo-950 rounded-2xl p-5 shadow-xl relative overflow-hidden flex flex-col text-white animate-in zoom-in-95 border border-slate-800">
+                    <div className="absolute right-0 top-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                    
+                    <div className="flex items-start justify-between gap-2 relative z-10 mb-4">
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="bg-emerald-500 text-white text-[8px] uppercase font-black px-1.5 py-0.5 rounded tracking-widest">Active</span>
+                          <span className="text-indigo-300 font-bold text-[9px]">{activeRoadmap.exam}</span>
+                        </div>
+                        <h2 className="text-base font-black leading-tight">{activeRoadmap.timeframe}-Day Plan</h2>
                       </div>
-                      <h2 className="text-base font-black leading-tight">{activeRoadmap.timeframe}-Day Plan</h2>
-                    </div>
-                    <button onClick={requestDeleteRoadmap} className="w-7 h-7 rounded-md bg-slate-800 hover:bg-rose-500 text-slate-400 hover:text-white transition flex items-center justify-center border border-slate-700 hover:border-rose-400 shadow-sm shrink-0" title="End Roadmap">
-                      <i className="fas fa-trash-alt text-[10px]"></i>
-                    </button>
-                  </div>
-
-                  {/* Today's Focus Card */}
-                  {todaysPlan ? (
-                    <div className="bg-white/5 backdrop-blur-md border border-white/10 p-3.5 rounded-xl mb-4 relative z-10 shadow-sm">
-                      <h4 className="text-[8px] font-black text-indigo-300 uppercase tracking-widest mb-1.5 flex items-center gap-1"><i className="far fa-calendar-check text-emerald-400"></i> Day {todaysPlan.day} Focus</h4>
-                      <p className="font-bold text-white text-sm leading-tight mb-1">{todaysPlan.theme}</p>
-                      <p className="text-[10px] text-slate-300 font-medium leading-snug mb-3">{todaysPlan.studyFocus}</p>
-                      <button onClick={() => router.push('/student/planner')} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white font-black py-1.5 rounded-lg transition shadow-sm text-[10px]">
-                        Open Planner
+                      <button onClick={requestDeleteRoadmap} className="w-7 h-7 rounded-md bg-slate-800 hover:bg-rose-500 text-slate-400 hover:text-white transition flex items-center justify-center border border-slate-700 hover:border-rose-400 shadow-sm shrink-0" title="End Roadmap">
+                        <i className="fas fa-trash-alt text-[10px]"></i>
                       </button>
                     </div>
-                  ) : (
-                    <div className="bg-emerald-500/20 border border-emerald-500/30 p-3 rounded-xl mb-4 relative z-10 text-center shadow-inner">
-                      <h4 className="font-black text-emerald-400 text-xs mb-0.5"><i className="fas fa-trophy mr-1"></i>Completed!</h4>
-                    </div>
-                  )}
 
-                  {/* COMPACT CALENDAR WIDGET */}
-                  <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 relative z-10 shadow-inner">
-                    <div className="flex justify-between items-center mb-3">
-                      <h3 className="font-black text-indigo-100 text-xs"><i className="far fa-calendar-alt mr-1.5 text-indigo-400"></i> {monthNames[currentMonth]} {currentYear}</h3>
-                      <div className="text-[8px] font-black bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1">
-                        <i className="fas fa-check-circle"></i> {activeRoadmap.completedDays?.length || 0} / {activeRoadmap.timeframe}
+                    {/* Today's Focus Card */}
+                    {todaysPlan ? (
+                      <div className="bg-white/5 backdrop-blur-md border border-white/10 p-3.5 rounded-xl mb-4 relative z-10 shadow-sm">
+                        <h4 className="text-[8px] font-black text-indigo-300 uppercase tracking-widest mb-1.5 flex items-center gap-1"><i className="far fa-calendar-check text-emerald-400"></i> Day {todaysPlan.day} Focus</h4>
+                        <p className="font-bold text-white text-sm leading-tight mb-1">{todaysPlan.theme}</p>
+                        <p className="text-[10px] text-slate-300 font-medium leading-snug mb-3">{todaysPlan.studyFocus}</p>
+                        <button onClick={() => router.push('/student/planner')} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white font-black py-1.5 rounded-lg transition shadow-sm text-[10px]">
+                          Open Planner
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="bg-emerald-500/20 border border-emerald-500/30 p-3 rounded-xl mb-4 relative z-10 text-center shadow-inner">
+                        <h4 className="font-black text-emerald-400 text-xs mb-0.5"><i className="fas fa-trophy mr-1"></i>Completed!</h4>
+                      </div>
+                    )}
+
+                    {/* COMPACT CALENDAR WIDGET */}
+                    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 relative z-10 shadow-inner">
+                      <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-black text-indigo-100 text-xs"><i className="far fa-calendar-alt mr-1.5 text-indigo-400"></i> {monthNames[currentMonth]} {currentYear}</h3>
+                        <div className="text-[8px] font-black bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1">
+                          <i className="fas fa-check-circle"></i> {activeRoadmap.completedDays?.length || 0} / {activeRoadmap.timeframe}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-7 gap-1 text-center mb-1.5">
+                        {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
+                          <div key={day} className="text-[8px] font-black text-indigo-300/50 uppercase tracking-widest">{day}</div>
+                        ))}
+                      </div>
+
+                      <div className="grid grid-cols-7 gap-1">
+                        {Array.from({ length: firstDayOfMonth }).map((_, i) => (
+                          <div key={`empty-${i}`} className="h-7"></div>
+                        ))}
+                        
+                        {Array.from({ length: daysInMonth }).map((_, i) => {
+                          const dateNum = i + 1;
+                          const currentDateObj = new Date(currentYear, currentMonth, dateNum);
+                          currentDateObj.setHours(0,0,0,0);
+                          
+                          const isTodayDate = dateNum === today.getDate() && currentMonth === today.getMonth() && currentYear === today.getFullYear();
+                          const roadmapDayNum = getRoadmapDayForDate(currentDateObj, activeRoadmap.startDate, activeRoadmap.timeframe);
+                          const isCompleted = roadmapDayNum && activeRoadmap.completedDays?.includes(roadmapDayNum);
+                          
+                          const todayObj = new Date(); todayObj.setHours(0,0,0,0);
+                          const isMissed = roadmapDayNum && !isCompleted && currentDateObj < todayObj;
+
+                          let cellClass = "h-7 rounded flex items-center justify-center font-black transition-all relative select-none ";
+                          let content = <span className="text-[10px]">{dateNum}</span>;
+
+                          if (roadmapDayNum) {
+                            if (isCompleted) {
+                              cellClass += "bg-rose-500/20 border border-rose-500/50 text-rose-400 cursor-pointer hover:bg-rose-500/30";
+                              content = <i className={`fas fa-fire text-[11px] ${justCompletedDay === roadmapDayNum ? 'animate-bounce text-rose-500 scale-125' : ''}`}></i>;
+                            } else if (isTodayDate) {
+                              cellClass += "bg-indigo-500 border border-indigo-400 text-white cursor-pointer hover:bg-indigo-400 z-10 shadow-sm";
+                              content = <span className="text-[10px]">D{roadmapDayNum}</span>;
+                            } else if (isMissed) {
+                              cellClass += "bg-slate-800/80 border border-slate-700/80 text-slate-500";
+                              content = <span className="text-[9px] opacity-50 line-through">D{roadmapDayNum}</span>;
+                            } else {
+                              cellClass += "bg-white/5 border border-white/10 text-indigo-200/50 cursor-not-allowed";
+                              content = <span className="text-[9px]">D{roadmapDayNum}</span>;
+                            }
+                          } else {
+                            if (isTodayDate) cellClass += "bg-white/10 border border-white/20 text-white";
+                            else cellClass += "bg-transparent border border-transparent text-slate-500/30";
+                          }
+
+                          return (
+                            <div 
+                              key={dateNum} 
+                              className={cellClass}
+                              onClick={() => {
+                                 if (roadmapDayNum && (isTodayDate || isCompleted)) toggleRoadmapDay(roadmapDayNum, isTodayDate);
+                                 else if (roadmapDayNum && !isTodayDate) showToast(isMissed ? "You missed this day!" : "This day hasn't unlocked yet!", "error");
+                              }}
+                              title={roadmapDayNum ? `Roadmap Day ${roadmapDayNum}` : ""}
+                            >
+                              {content}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-7 gap-1 text-center mb-1.5">
-                      {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
-                        <div key={day} className="text-[8px] font-black text-indigo-300/50 uppercase tracking-widest">{day}</div>
-                      ))}
-                    </div>
-
-                    <div className="grid grid-cols-7 gap-1">
-                      {Array.from({ length: firstDayOfMonth }).map((_, i) => (
-                        <div key={`empty-${i}`} className="h-7"></div>
-                      ))}
-                      
-                      {Array.from({ length: daysInMonth }).map((_, i) => {
-                        const dateNum = i + 1;
-                        const currentDateObj = new Date(currentYear, currentMonth, dateNum);
-                        currentDateObj.setHours(0,0,0,0);
-                        
-                        const isTodayDate = dateNum === today.getDate() && currentMonth === today.getMonth() && currentYear === today.getFullYear();
-                        const roadmapDayNum = getRoadmapDayForDate(currentDateObj, activeRoadmap.startDate, activeRoadmap.timeframe);
-                        const isCompleted = roadmapDayNum && activeRoadmap.completedDays?.includes(roadmapDayNum);
-                        
-                        const todayObj = new Date(); todayObj.setHours(0,0,0,0);
-                        const isMissed = roadmapDayNum && !isCompleted && currentDateObj < todayObj;
-
-                        let cellClass = "h-7 rounded flex items-center justify-center font-black transition-all relative select-none ";
-                        let content = <span className="text-[10px]">{dateNum}</span>;
-
-                        if (roadmapDayNum) {
-                          if (isCompleted) {
-                            cellClass += "bg-rose-500/20 border border-rose-500/50 text-rose-400 cursor-pointer hover:bg-rose-500/30";
-                            content = <i className={`fas fa-fire text-[11px] ${justCompletedDay === roadmapDayNum ? 'animate-bounce text-rose-500 scale-125' : ''}`}></i>;
-                          } else if (isTodayDate) {
-                            cellClass += "bg-indigo-500 border border-indigo-400 text-white cursor-pointer hover:bg-indigo-400 z-10 shadow-sm";
-                            content = <span className="text-[10px]">D{roadmapDayNum}</span>;
-                          } else if (isMissed) {
-                            cellClass += "bg-slate-800/80 border border-slate-700/80 text-slate-500";
-                            content = <span className="text-[9px] opacity-50 line-through">D{roadmapDayNum}</span>;
-                          } else {
-                            cellClass += "bg-white/5 border border-white/10 text-indigo-200/50 cursor-not-allowed";
-                            content = <span className="text-[9px]">D{roadmapDayNum}</span>;
-                          }
-                        } else {
-                          if (isTodayDate) cellClass += "bg-white/10 border border-white/20 text-white";
-                          else cellClass += "bg-transparent border border-transparent text-slate-500/30";
-                        }
-
-                        return (
-                          <div 
-                            key={dateNum} 
-                            className={cellClass}
-                            onClick={() => {
-                               if (roadmapDayNum && (isTodayDate || isCompleted)) toggleRoadmapDay(roadmapDayNum, isTodayDate);
-                               else if (roadmapDayNum && !isTodayDate) showToast(isMissed ? "You missed this day!" : "This day hasn't unlocked yet!", "error");
-                            }}
-                            title={roadmapDayNum ? `Roadmap Day ${roadmapDayNum}` : ""}
-                          >
-                            {content}
-                          </div>
-                        );
-                      })}
-                    </div>
                   </div>
+                ) : (
+                  <div className="bg-indigo-50 rounded-2xl p-5 border border-indigo-100 text-center shadow-sm">
+                    <div className="w-12 h-12 bg-indigo-100 text-indigo-500 rounded-full flex items-center justify-center text-xl mx-auto mb-3"><i className="fas fa-map-marked-alt"></i></div>
+                    <h3 className="text-sm font-black text-indigo-900 mb-1">No Active Roadmap</h3>
+                    <p className="text-[10px] font-medium text-indigo-700 mb-3">Generate an AI schedule to track your daily progress.</p>
+                    <button onClick={() => router.push('/student/planner')} className="w-full bg-indigo-600 text-white text-xs font-black py-2 rounded-lg hover:bg-indigo-700 transition shadow-sm">Create Plan</button>
+                  </div>
+                )}
+              </div>
 
-                </div>
-              ) : (
-                <div className="bg-indigo-50 rounded-2xl p-5 border border-indigo-100 text-center shadow-sm">
-                  <div className="w-12 h-12 bg-indigo-100 text-indigo-500 rounded-full flex items-center justify-center text-xl mx-auto mb-3"><i className="fas fa-map-marked-alt"></i></div>
-                  <h3 className="text-sm font-black text-indigo-900 mb-1">No Active Roadmap</h3>
-                  <p className="text-[10px] font-medium text-indigo-700 mb-3">Generate an AI schedule to track your daily progress.</p>
-                  <button onClick={() => router.push('/student/planner')} className="w-full bg-indigo-600 text-white text-xs font-black py-2 rounded-lg hover:bg-indigo-700 transition shadow-sm">Create Plan</button>
-                </div>
-              )}
-
-              {/* PERFORMANCE STATS */}
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+              {/* PERFORMANCE STATS WITH TOUR ID */}
+              <div id="tour-stats" className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4"><i className="fas fa-chart-line mr-1"></i> Quick Stats</h3>
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">

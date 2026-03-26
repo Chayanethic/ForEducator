@@ -2,7 +2,7 @@ import { ClerkProvider } from '@clerk/nextjs'
 import './globals.css'
 
 export const metadata = {
-  title: 'SmartQAI Platform',
+  title: 'Ozone Platform',
   description: 'AI-Powered Exam Preparation & Analytics',
 }
 

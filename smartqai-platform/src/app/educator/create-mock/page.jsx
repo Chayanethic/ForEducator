@@ -8,8 +8,51 @@ import { db, storage } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-// --- IMPORT THE EDUCATOR TOUR ---
 import EducatorTour from "@/components/EducatorTour";
+
+// --- EXTREME COMPRESSION ENGINE ---
+// Optimized for maximum speed: Drops massive 5MB screenshots to ~40KB in milliseconds
+const compressImage = async (imageFile, maxWidth = 800, quality = 0.6) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(imageFile);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth) {
+          height = (maxWidth / width) * height;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) return reject(new Error("Canvas to Blob failed"));
+            const safeName = (imageFile.name || `pasted-${Date.now()}`).replace(/\.[^/.]+$/, "");
+            const compressedFile = new File([blob], `${safeName}.jpeg`, {
+              type: "image/jpeg",
+              lastModified: Date.now(),
+            });
+            resolve(compressedFile);
+          },
+          "image/jpeg",
+          quality
+        );
+      };
+      img.onerror = (error) => reject(error);
+    };
+    reader.onerror = (error) => reject(error);
+  });
+};
 
 export default function CreateMockPage() {
   const { user, isLoaded, isSignedIn } = useUser();
@@ -20,7 +63,6 @@ export default function CreateMockPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [questions, setQuestions] = useState([]);
   
-  // --- Page Range Selection ---
   const [startPage, setStartPage] = useState(1);
   const [endPage, setEndPage] = useState(1); 
   
@@ -34,9 +76,10 @@ export default function CreateMockPage() {
   const [confirmDialog, setConfirmDialog] = useState(null);
 
   const [recentRooms, setRecentRooms] = useState([]);
-
-  // --- Voice Dictation State ---
   const [listeningField, setListeningField] = useState(null);
+
+  // --- Global Uploading State to block the Publish button ---
+  const [uploadingCount, setUploadingCount] = useState(0);
 
   const [examSections, setExamSections] = useState([{ name: "General", count: 0 }]);
   const [examTitle, setExamTitle] = useState("Custom AI & Manual Mock");
@@ -65,9 +108,7 @@ export default function CreateMockPage() {
     if (isLoaded && isSignedIn) fetchRecentRooms();
   }, [user, isLoaded, isSignedIn]);
 
-  // --- FIXED VOICE DICTATION: Forces Mic Permissions First ---
   const toggleDictation = async (qIndex, field, optIndex = null) => {
-    // 1. Force the browser to ask for Microphone permissions to prevent silent failures
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
@@ -75,28 +116,22 @@ export default function CreateMockPage() {
     }
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      return showToast("Voice typing requires Google Chrome or Microsoft Edge.", "error");
-    }
+    if (!SpeechRecognition) return showToast("Voice typing requires Chrome or Edge.", "error");
 
     const fieldId = optIndex !== null ? `q-${qIndex}-opt-${optIndex}` : `q-${qIndex}-${field}`;
 
-    // If currently listening to this exact field, stop it
     if (listeningField === fieldId) {
       setListeningField(null);
       if (window.recognitionInstance) window.recognitionInstance.stop();
       return;
     }
 
-    // Stop any existing background listening sessions
-    if (window.recognitionInstance) {
-      window.recognitionInstance.stop();
-    }
+    if (window.recognitionInstance) window.recognitionInstance.stop();
 
     const recognition = new SpeechRecognition();
-    recognition.continuous = false; // Stops automatically after a sentence
+    recognition.continuous = false; 
     recognition.interimResults = false;
-    recognition.lang = 'en-IN'; // Indian English: Understands Hinglish perfectly and writes in English!
+    recognition.lang = 'en-IN'; 
 
     recognition.onstart = () => {
       setListeningField(fieldId);
@@ -105,7 +140,6 @@ export default function CreateMockPage() {
 
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
-      
       setQuestions(prev => {
         const updated = [...prev];
         if (optIndex !== null) {
@@ -122,14 +156,11 @@ export default function CreateMockPage() {
     recognition.onerror = (event) => {
       setListeningField(null);
       if (event.error === 'not-allowed' || event.error === 'audio-capture') {
-        showToast("Browser could not capture audio. Please check your mic settings.", "error");
+        showToast("Browser could not capture audio.", "error");
       }
     };
 
-    recognition.onend = () => {
-      setListeningField(null);
-    };
-
+    recognition.onend = () => setListeningField(null);
     window.recognitionInstance = recognition;
     recognition.start();
   };
@@ -185,18 +216,111 @@ export default function CreateMockPage() {
     });
   };
 
+  // --- HIGH SPEED UPLOAD HANDLER ---
   const handleImageUpload = async (imageFile, qIndex, type = 'question', optIndex = null) => {
     if (!imageFile) return;
-    const fileRef = ref(storage, `mocks/images/${Date.now()}-${imageFile.name}`);
+
+    setUploadingCount(prev => prev + 1); // Lock Publish button
+
+    // 1. Instant local preview
+    const localUrl = URL.createObjectURL(imageFile);
+    const uniqueId = Date.now().toString(); // Track this exact upload instance
+    
+    setQuestions(prev => {
+      const updated = [...prev];
+      if (type === 'option' && optIndex !== null) {
+        updated[qIndex].options[optIndex].imageUrl = localUrl;
+        updated[qIndex].options[optIndex].isUploading = true;
+        updated[qIndex].options[optIndex].uploadId = uniqueId;
+      } else if (type === 'explanation') {
+        updated[qIndex].explanationImage = localUrl;
+        updated[qIndex].isUploadingExp = true;
+        updated[qIndex].expUploadId = uniqueId;
+      } else {
+        updated[qIndex].imageUrl = localUrl;
+        updated[qIndex].isUploadingQ = true;
+        updated[qIndex].qUploadId = uniqueId;
+      }
+      return updated;
+    });
+
     try {
-      const snapshot = await uploadBytes(fileRef, imageFile);
+      // 2. Ultra-fast compression
+      const compressedFile = await compressImage(imageFile);
+      const fileRef = ref(storage, `mocks/images/${Date.now()}-${compressedFile.name}`);
+
+      // 3. Fast Upload (This is where it will fail safely if Firebase Storage is not activated)
+      const snapshot = await uploadBytes(fileRef, compressedFile);
       const downloadURL = await getDownloadURL(snapshot.ref);
-      const updated = [...questions];
-      if (type === 'option' && optIndex !== null) { updated[qIndex].options[optIndex].imageUrl = downloadURL; updated[qIndex].options[optIndex].hasImage = true; } 
-      else if (type === 'explanation') { updated[qIndex].explanationImage = downloadURL; } 
-      else { updated[qIndex].imageUrl = downloadURL; updated[qIndex].hasImage = true; }
-      setQuestions(updated); showToast("Image uploaded successfully!", "success");
-    } catch (error) { showToast("Failed to upload image.", "error"); }
+      
+      // 4. Update UI with final URL (Only if user didn't cancel it)
+      setQuestions(prev => {
+        const updated = [...prev];
+        if (type === 'option' && optIndex !== null) {
+          if (updated[qIndex].options[optIndex].uploadId === uniqueId) {
+            updated[qIndex].options[optIndex].imageUrl = downloadURL;
+            updated[qIndex].options[optIndex].hasImage = true;
+            updated[qIndex].options[optIndex].isUploading = false;
+          }
+        } else if (type === 'explanation') {
+          if (updated[qIndex].expUploadId === uniqueId) {
+            updated[qIndex].explanationImage = downloadURL;
+            updated[qIndex].isUploadingExp = false;
+          }
+        } else {
+          if (updated[qIndex].qUploadId === uniqueId) {
+            updated[qIndex].imageUrl = downloadURL;
+            updated[qIndex].hasImage = true;
+            updated[qIndex].isUploadingQ = false;
+          }
+        }
+        return updated;
+      });
+      showToast("Image uploaded quickly!", "success");
+    } catch (error) {
+      console.error(error);
+      showToast("Storage not enabled. Image reverted.", "error");
+      removeImage(qIndex, type, optIndex); // Remove broken image automatically
+    } finally {
+      setUploadingCount(prev => prev > 0 ? prev - 1 : 0); // Unlock Publish Button
+    }
+  };
+
+  // --- CANCEL / REMOVE IMAGE HANDLER ---
+  const removeImage = (qIndex, type = 'question', optIndex = null) => {
+    setQuestions(prev => {
+      const updated = [...prev];
+      if (type === 'option' && optIndex !== null) {
+        updated[qIndex].options[optIndex].imageUrl = null;
+        updated[qIndex].options[optIndex].isUploading = false;
+        updated[qIndex].options[optIndex].uploadId = null;
+        updated[qIndex].options[optIndex].hasImage = false;
+      } else if (type === 'explanation') {
+        updated[qIndex].explanationImage = null;
+        updated[qIndex].isUploadingExp = false;
+        updated[qIndex].expUploadId = null;
+      } else {
+        updated[qIndex].imageUrl = null;
+        updated[qIndex].isUploadingQ = false;
+        updated[qIndex].qUploadId = null;
+        updated[qIndex].hasImage = false;
+      }
+      return updated;
+    });
+  };
+
+  const handlePaste = (e, qIndex, type = 'question', optIndex = null) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        e.preventDefault(); 
+        const blob = items[i].getAsFile();
+        handleImageUpload(blob, qIndex, type, optIndex);
+        break; 
+      }
+    }
   };
 
   const handleTypeChange = (qIndex, newType) => {
@@ -238,7 +362,6 @@ export default function CreateMockPage() {
     });
   };
 
-  const handleCopyCode = () => { navigator.clipboard.writeText(publishedRoomId); setCopied(true); setTimeout(() => setCopied(false), 2000); };
   const updateSection = (index, field, value) => { const newSecs = [...examSections]; newSecs[index][field] = value; setExamSections(newSecs); };
   const addSection = () => { setExamSections([...examSections, { name: `Section ${examSections.length + 1}`, count: 0 }]); };
   const removeSection = (index) => { setExamSections(examSections.filter((_, i) => i !== index)); };
@@ -398,18 +521,27 @@ export default function CreateMockPage() {
             </div>
           </div>
           
-          <button id="tour-publish" onClick={saveToDatabase} disabled={questions.length === 0 || isPublishing || isProcessing} className={`w-full sm:w-auto px-6 py-3 md:py-2.5 rounded-xl font-bold shadow-sm transition flex items-center justify-center gap-2 ${questions.length > 0 && !isPublishing && !isProcessing ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-500/20 hover:-translate-y-0.5' : 'bg-slate-200 text-slate-500 cursor-not-allowed'}`}>
-            {isPublishing ? "Deploying..." : "Publish Exam"} <i className="fas fa-arrow-right"></i>
+          <button 
+            id="tour-publish" 
+            onClick={saveToDatabase} 
+            disabled={questions.length === 0 || isPublishing || isProcessing || uploadingCount > 0} 
+            className={`w-full sm:w-auto px-6 py-3 md:py-2.5 rounded-xl font-bold shadow-sm transition flex items-center justify-center gap-2 ${questions.length > 0 && !isPublishing && !isProcessing && uploadingCount === 0 ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-500/20 hover:-translate-y-0.5' : 'bg-slate-200 text-slate-500 cursor-not-allowed'}`}
+          >
+            {uploadingCount > 0 ? (
+              <><i className="fas fa-spinner fa-spin"></i> Uploading Images...</>
+            ) : isPublishing ? (
+              "Deploying..."
+            ) : (
+              <>"Publish Exam" <i className="fas fa-arrow-right"></i></>
+            )}
           </button>
         </header>
 
         <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 mt-4">
             
-            {/* LEFT COLUMN (8 SPANS) */}
             <div className="lg:col-span-8 space-y-5 lg:space-y-6">
               
-              {/* AI EXTRACT WIDGET */}
               <div id="tour-pdf-extract" className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
                 <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide mb-3"><i className="fas fa-robot text-indigo-500 mr-2"></i> AI PDF Extraction</h3>
                 
@@ -452,7 +584,6 @@ export default function CreateMockPage() {
                 </button>
               </div>
 
-              {/* MANUAL BUILD CARD */}
               <div id="tour-manual-build" className="bg-white p-6 rounded-2xl shadow-sm border-2 border-dashed border-emerald-200 hover:border-emerald-400 hover:shadow-md transition-all flex flex-col sm:flex-row justify-between items-center gap-6 group relative overflow-hidden">
                  <div className="absolute -right-10 -top-10 w-32 h-32 bg-emerald-100/50 rounded-full blur-3xl pointer-events-none group-hover:bg-emerald-200/50 transition-colors"></div>
                  <div className="relative z-10 flex items-start gap-4">
@@ -467,7 +598,6 @@ export default function CreateMockPage() {
                  </button>
               </div>
 
-              {/* EXAM SETTINGS */}
               <div id="tour-exam-settings" className={`bg-white p-6 rounded-2xl border border-slate-200 shadow-sm ${isPublishing ? 'opacity-50 pointer-events-none' : ''}`}>
                  <h2 className="text-sm font-black text-slate-800 mb-4 uppercase tracking-wide"><i className="fas fa-cog text-slate-400 mr-2"></i> Exam Configuration</h2>
                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -500,7 +630,6 @@ export default function CreateMockPage() {
                 </div>
               </div>
 
-              {/* QUESTIONS MAP */}
               {questions.length > 0 && (
                 <div className="space-y-4 md:space-y-6">
                   <div className={`bg-white p-4 md:p-6 rounded-2xl border border-slate-200 shadow-sm ${isPublishing ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -530,7 +659,7 @@ export default function CreateMockPage() {
 
                   {questions.map((q, qIndex) => (
                     <div key={qIndex} className={`bg-white border border-slate-200 rounded-2xl p-4 md:p-6 shadow-sm relative transition-all duration-300 group ${isPublishing ? 'opacity-70 pointer-events-none' : 'hover:border-indigo-300 hover:shadow-md'}`}>
-                      <button onClick={() => requestRemoveQuestion(qIndex)} disabled={isPublishing} className="absolute top-3 right-3 text-rose-400 hover:text-rose-600 hover:bg-rose-100 transition-all bg-rose-50 p-2 rounded-lg"><i className="fas fa-trash"></i></button>
+                      <button onClick={() => requestRemoveQuestion(qIndex)} disabled={isPublishing} className="absolute top-3 right-3 text-rose-400 hover:text-rose-600 hover:bg-rose-100 transition-all bg-rose-50 p-2 rounded-lg z-10"><i className="fas fa-trash"></i></button>
 
                       <div className="flex flex-wrap gap-2 md:gap-4 mb-4 items-center bg-slate-50 p-3 rounded-xl border border-slate-200 pr-12">
                         <span className="bg-slate-800 text-white text-xs font-black px-3 py-1.5 rounded">Q{qIndex + 1}</span>
@@ -551,13 +680,20 @@ export default function CreateMockPage() {
                         </div>
                       </div>
 
-                      {/* VOICE ENABLED TEXTAREA */}
                       <div className="relative w-full mb-3">
-                        <textarea disabled={isPublishing} value={q.text} onChange={(e) => updateQuestionField(qIndex, 'text', e.target.value)} placeholder="Type question text here or use voice typing..." className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 pr-12 text-sm text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none resize-y font-bold shadow-inner disabled:bg-slate-100 transition-shadow" rows="3"/>
+                        <textarea 
+                          disabled={isPublishing} 
+                          value={q.text} 
+                          onChange={(e) => updateQuestionField(qIndex, 'text', e.target.value)} 
+                          onPaste={(e) => handlePaste(e, qIndex, 'question')}
+                          placeholder="Type text, use voice, or Ctrl+V to paste image..." 
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 pr-12 text-sm text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none resize-y font-bold shadow-inner disabled:bg-slate-100 transition-shadow" 
+                          rows="3"
+                        />
                         <button 
                           onClick={() => toggleDictation(qIndex, 'text')}
                           className={`absolute bottom-3 right-3 p-2 rounded-lg transition-colors shadow-sm ${listeningField === `q-${qIndex}-text` ? 'bg-rose-100 text-rose-600 animate-pulse' : 'bg-slate-200 text-slate-500 hover:bg-indigo-100 hover:text-indigo-600'}`}
-                          title="Voice Typing (Optimized for Indian English)"
+                          title="Voice Typing"
                         >
                           <i className={`fas ${listeningField === `q-${qIndex}-text` ? 'fa-microphone' : 'fa-microphone-alt'}`}></i>
                         </button>
@@ -566,8 +702,24 @@ export default function CreateMockPage() {
                       <div className="mb-6">
                         {q.imageUrl ? (
                           <div className="relative rounded-xl border border-slate-300 overflow-hidden bg-slate-100 p-2 group/mainimg shadow-inner inline-block min-w-[200px]">
-                            <img src={q.imageUrl} alt="Q" className="max-h-32 mx-auto object-contain" />
-                            <label className={`absolute inset-0 w-full h-full bg-slate-900/80 flex items-center justify-center opacity-0 group-hover/mainimg:opacity-100 transition-opacity backdrop-blur-sm ${isPublishing ? 'cursor-not-allowed' : 'cursor-pointer'}`}><span className="bg-white text-slate-900 text-xs font-bold px-4 py-2 rounded-xl shadow-xl hover:scale-105 transition-transform"><i className="fas fa-upload mr-2"></i> Replace Image</span><input type="file" accept="image/*" disabled={isPublishing} className="hidden" onChange={(e) => handleImageUpload(e.target.files[0], qIndex, 'question')} /></label>
+                            <button onClick={() => removeImage(qIndex, 'question')} className="absolute top-2 right-2 bg-rose-500/90 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px] z-20 hover:bg-rose-600 shadow-md transition-transform hover:scale-110 backdrop-blur-md">
+                                <i className="fas fa-times"></i>
+                            </button>
+
+                            {q.isUploadingQ && (
+                              <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-10">
+                                <i className="fas fa-spinner fa-spin text-indigo-600 text-3xl drop-shadow-md mb-2"></i>
+                                <span className="text-[10px] font-black text-indigo-800 tracking-widest animate-pulse">OPTIMIZING & UPLOADING</span>
+                              </div>
+                            )}
+                            <img src={q.imageUrl} alt="Q" className={`max-h-48 mx-auto object-contain transition-opacity ${q.isUploadingQ ? 'opacity-30 blur-sm' : ''}`} />
+                            
+                            {!q.isUploadingQ && (
+                              <label className={`absolute inset-0 w-full h-full bg-slate-900/80 flex items-center justify-center opacity-0 group-hover/mainimg:opacity-100 transition-opacity backdrop-blur-sm ${isPublishing ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                                <span className="bg-white text-slate-900 text-xs font-bold px-4 py-2 rounded-xl shadow-xl hover:scale-105 transition-transform"><i className="fas fa-upload mr-2"></i> Replace Image</span>
+                                <input type="file" accept="image/*" disabled={isPublishing} className="hidden" onChange={(e) => handleImageUpload(e.target.files[0], qIndex, 'question')} />
+                              </label>
+                            )}
                           </div>
                         ) : (
                           <label className={`text-xs font-bold text-indigo-700 bg-indigo-50 px-4 py-2 rounded-lg inline-flex items-center gap-2 border border-indigo-200 transition-all shadow-sm ${isPublishing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-indigo-100 hover:shadow-md hover:-translate-y-0.5'}`}><i className="fas fa-camera"></i> Attach Diagram<input type="file" accept="image/*" disabled={isPublishing} className="hidden" onChange={(e) => handleImageUpload(e.target.files[0], qIndex, 'question')} /></label>
@@ -587,8 +739,15 @@ export default function CreateMockPage() {
                               <div key={optIndex} className={`flex items-start gap-3 p-3 rounded-xl border transition-all shadow-sm bg-white ${isCorrect ? 'border-emerald-500 ring-1 ring-emerald-200' : 'border-slate-300 hover:border-indigo-300'}`}>
                                 <input disabled={isPublishing} type={q.type === 'MSQ' ? "checkbox" : "radio"} name={q.type === 'MSQ' ? `q-${qIndex}-${optIndex}` : `q-${qIndex}-correct`} checked={isCorrect} onChange={() => q.type === 'MSQ' ? toggleMsqAnswer(qIndex, opt.id) : updateQuestionField(qIndex, 'correctAnswer', opt.id)} className={`mt-2 w-5 h-5 accent-emerald-600 transition-transform ${isPublishing ? 'cursor-not-allowed' : 'cursor-pointer hover:scale-110'}`} />
                                 <div className="flex-1 relative">
-                                  {/* VOICE ENABLED OPTION INPUT */}
-                                  <input disabled={isPublishing} type="text" value={opt.text} onChange={(e) => updateOptionText(qIndex, optIndex, e.target.value)} placeholder={`Option ${opt.id}`} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 pr-8 text-xs outline-none font-bold text-slate-900 focus:border-indigo-400 focus:bg-white disabled:bg-slate-100 transition-shadow" />
+                                  <input 
+                                    disabled={isPublishing} 
+                                    type="text" 
+                                    value={opt.text} 
+                                    onChange={(e) => updateOptionText(qIndex, optIndex, e.target.value)} 
+                                    onPaste={(e) => handlePaste(e, qIndex, 'option', optIndex)}
+                                    placeholder={`Option ${opt.id} (Ctrl+V image)`} 
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 pr-8 text-xs outline-none font-bold text-slate-900 focus:border-indigo-400 focus:bg-white disabled:bg-slate-100 transition-shadow" 
+                                  />
                                   <button 
                                     onClick={() => toggleDictation(qIndex, 'option', optIndex)}
                                     className={`absolute top-[5px] right-[5px] p-1 rounded transition-colors ${listeningField === `q-${qIndex}-opt-${optIndex}` ? 'text-rose-500 animate-pulse' : 'text-slate-400 hover:text-indigo-600'}`}
@@ -598,9 +757,25 @@ export default function CreateMockPage() {
 
                                   <div className="mt-2">
                                     {opt.imageUrl ? (
-                                      <div className="relative border border-slate-300 rounded-lg overflow-hidden bg-slate-100 p-1 group/optimg">
-                                        <img src={opt.imageUrl} alt="Opt" className="max-h-16 mx-auto object-contain" />
-                                        <label className={`absolute inset-0 w-full h-full bg-slate-900/80 text-white text-[10px] font-bold opacity-0 group-hover/optimg:opacity-100 flex items-center justify-center backdrop-blur-sm transition-all ${isPublishing ? 'cursor-not-allowed' : 'cursor-pointer hover:text-emerald-300'}`}>Upload<input type="file" disabled={isPublishing} accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e.target.files[0], qIndex, 'option', optIndex)} /></label>
+                                      <div className="relative border border-slate-300 rounded-lg overflow-hidden bg-slate-100 p-1 group/optimg min-h-[60px]">
+                                        <button onClick={() => removeImage(qIndex, 'option', optIndex)} className="absolute top-1 right-1 bg-rose-500/90 text-white w-5 h-5 rounded-full flex items-center justify-center text-[8px] z-20 hover:bg-rose-600 shadow-md transition-transform hover:scale-110 backdrop-blur-md">
+                                            <i className="fas fa-times"></i>
+                                        </button>
+
+                                        {opt.isUploading && (
+                                          <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-10">
+                                            <i className="fas fa-spinner fa-spin text-indigo-600 text-xl drop-shadow-md mb-1"></i>
+                                            <span className="text-[8px] font-black text-indigo-800 tracking-widest animate-pulse">UPLOADING</span>
+                                          </div>
+                                        )}
+                                        <img src={opt.imageUrl} alt="Opt" className={`max-h-24 mx-auto object-contain transition-opacity ${opt.isUploading ? 'opacity-30 blur-sm' : ''}`} />
+                                        
+                                        {!opt.isUploading && (
+                                          <label className={`absolute inset-0 w-full h-full bg-slate-900/80 text-white text-[10px] font-bold opacity-0 group-hover/optimg:opacity-100 flex items-center justify-center backdrop-blur-sm transition-all ${isPublishing ? 'cursor-not-allowed' : 'cursor-pointer hover:text-emerald-300'}`}>
+                                            Upload
+                                            <input type="file" disabled={isPublishing} accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e.target.files[0], qIndex, 'option', optIndex)} />
+                                          </label>
+                                        )}
                                       </div>
                                     ) : (<label className={`text-[10px] font-bold text-slate-600 inline-flex items-center gap-1 bg-white border border-slate-300 px-2 py-1 rounded transition-all ${isPublishing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-slate-100 hover:shadow-sm'}`}><i className="fas fa-image"></i> Add Image<input disabled={isPublishing} type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e.target.files[0], qIndex, 'option', optIndex)} /></label>)}
                                   </div>
@@ -622,15 +797,36 @@ export default function CreateMockPage() {
                           )}
                         </div>
                         
-                        <textarea disabled={isPublishing} value={q.explanation || ""} onChange={(e) => updateQuestionField(qIndex, 'explanation', e.target.value)} className="w-full bg-white border border-indigo-200 rounded-lg p-3 text-xs font-medium text-slate-800 outline-none focus:border-indigo-400 resize-y shadow-sm mb-3 disabled:bg-slate-50 transition-shadow" rows="2" placeholder="Type explanation here..."/>
+                        <textarea 
+                          disabled={isPublishing} 
+                          value={q.explanation || ""} 
+                          onChange={(e) => updateQuestionField(qIndex, 'explanation', e.target.value)} 
+                          onPaste={(e) => handlePaste(e, qIndex, 'explanation')}
+                          className="w-full bg-white border border-indigo-200 rounded-lg p-3 text-xs font-medium text-slate-800 outline-none focus:border-indigo-400 resize-y shadow-sm mb-3 disabled:bg-slate-50 transition-shadow" 
+                          rows="2" 
+                          placeholder="Type explanation, or Ctrl+V to paste image..."
+                        />
                         
                         {q.explanationImage && q.explanationImage.trim() !== "" && (
                           <div className="relative rounded-xl border border-slate-300 overflow-hidden bg-white p-2 group/expimg shadow-inner inline-block min-w-[200px]">
-                            <img src={q.explanationImage} alt="Explanation" className="max-h-32 object-contain" />
-                            <label className={`absolute inset-0 w-full h-full bg-slate-900/80 text-white text-xs font-bold flex items-center justify-center opacity-0 group-hover/expimg:opacity-100 transition-opacity backdrop-blur-sm ${isPublishing ? 'cursor-not-allowed' : 'cursor-pointer hover:text-emerald-300'}`}>
-                              Replace Image
-                              <input disabled={isPublishing} type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e.target.files[0], qIndex, 'explanation')} />
-                            </label>
+                            <button onClick={() => removeImage(qIndex, 'explanation')} className="absolute top-2 right-2 bg-rose-500/90 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px] z-20 hover:bg-rose-600 shadow-md transition-transform hover:scale-110 backdrop-blur-md">
+                                <i className="fas fa-times"></i>
+                            </button>
+
+                            {q.isUploadingExp && (
+                              <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-10">
+                                <i className="fas fa-spinner fa-spin text-indigo-600 text-3xl drop-shadow-md mb-2"></i>
+                                <span className="text-[10px] font-black text-indigo-800 tracking-widest animate-pulse">OPTIMIZING & UPLOADING</span>
+                              </div>
+                            )}
+                            <img src={q.explanationImage} alt="Explanation" className={`max-h-32 mx-auto object-contain transition-opacity ${q.isUploadingExp ? 'opacity-30 blur-sm' : ''}`} />
+                            
+                            {!q.isUploadingExp && (
+                              <label className={`absolute inset-0 w-full h-full bg-slate-900/80 text-white text-xs font-bold flex items-center justify-center opacity-0 group-hover/expimg:opacity-100 transition-opacity backdrop-blur-sm ${isPublishing ? 'cursor-not-allowed' : 'cursor-pointer hover:text-emerald-300'}`}>
+                                Replace Image
+                                <input disabled={isPublishing || q.isUploadingExp} type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e.target.files[0], qIndex, 'explanation')} />
+                              </label>
+                            )}
                           </div>
                         )}
                       </div>
@@ -644,7 +840,6 @@ export default function CreateMockPage() {
             {/* RIGHT COLUMN (4 SPANS) - SIDEBAR WIDGETS */}
             <div className="lg:col-span-4 space-y-5 lg:space-y-6">
                
-               {/* RECENT LIVE ROOMS WIDGET */}
                <div id="tour-recent-rooms" className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl p-5 shadow-xl relative overflow-hidden border border-indigo-500 text-white">
                   <div className="absolute -right-10 -top-10 w-32 h-32 bg-indigo-400/30 rounded-full blur-3xl pointer-events-none"></div>
                   <h3 className="font-black text-sm uppercase tracking-widest text-indigo-100 mb-4 flex items-center relative z-10"><i className="fas fa-broadcast-tower text-emerald-400 mr-2 animate-pulse"></i> Active Live Rooms</h3>
@@ -667,7 +862,6 @@ export default function CreateMockPage() {
                   <button onClick={() => router.push('/educator/live-rooms')} className="w-full mt-2 bg-indigo-800 hover:bg-indigo-900 text-white text-xs font-black py-2.5 rounded-lg transition-colors shadow-sm relative z-10">Manage All Rooms</button>
                </div>
 
-               {/* QUICK POLL WIDGET */}
                <div id="tour-quick-poll" className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md hover:border-amber-300 transition-all group cursor-pointer" onClick={() => router.push('/educator/quiz-poll')}>
                   <div className="w-12 h-12 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center text-xl mb-4 group-hover:scale-110 group-hover:bg-amber-500 group-hover:text-white transition-all shadow-sm"><i className="fas fa-bolt"></i></div>
                   <h3 className="font-black text-slate-900 text-base mb-1.5">Instant Quiz Poll</h3>

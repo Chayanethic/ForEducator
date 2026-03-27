@@ -15,19 +15,13 @@ const DraggableCalculator = ({ onClose }) => {
 
   const handleMouseDown = (e) => {
     setIsDragging(true);
-    setDragOffset({
-      x: e.clientX - position.x,
-      y: e.clientY - position.y
-    });
+    setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
   };
 
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (isDragging) {
-        setPosition({
-          x: e.clientX - dragOffset.x,
-          y: e.clientY - dragOffset.y
-        });
+        setPosition({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
       }
     };
     const handleMouseUp = () => setIsDragging(false);
@@ -129,6 +123,7 @@ export default function ExamInterface() {
   
   const [showCalculator, setShowCalculator] = useState(false);
   const containerRef = useRef(null);
+  const [isSubmittingEngine, setIsSubmittingEngine] = useState(false);
 
   const showToast = (message, type = "success") => {
     setToast({ show: true, message, type });
@@ -263,19 +258,23 @@ export default function ExamInterface() {
   }, [mockId, router, user, isLoaded]);
 
   useEffect(() => {
-    if (examPhase !== 'active' || questions.length === 0) return;
+    if (examPhase !== 'active' || questions.length === 0 || isSubmittingEngine) return;
+    
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          handleAutoSubmit(); 
+          if (!isSubmittingEngine) {
+             setIsSubmittingEngine(true);
+             handleAutoSubmit(); 
+          }
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [examPhase, questions.length]);
+  }, [examPhase, questions.length, isSubmittingEngine]);
 
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600);
@@ -301,13 +300,38 @@ export default function ExamInterface() {
     setExamPhase('active');
   };
 
-  const handleSectionTabClick = (sec) => {
-    setActiveSection(sec);
-    const firstQuestionIndex = questions.findIndex(q => (q.section || "General") === sec);
-    if (firstQuestionIndex !== -1) navigateTo(firstQuestionIndex, sec);
+  const navigateQuestion = (targetIndex, forcedCurrentStatus = null) => {
+    setStatuses(prevStatuses => {
+      const updated = [...prevStatuses];
+      const currentQType = questions[currentIndex]?.type || 'MCQ';
+
+      if (forcedCurrentStatus) {
+         updated[currentIndex] = forcedCurrentStatus;
+      } else {
+         if (updated[currentIndex] !== 'marked' && updated[currentIndex] !== 'answered-marked') {
+            updated[currentIndex] = checkHasAnswer(answers, currentIndex, currentQType) ? 'answered' : 'not-answered';
+         }
+      }
+
+      if (updated[targetIndex] === 'not-visited') {
+         updated[targetIndex] = 'not-answered';
+      }
+
+      saveProgressToCloud(answers, updated);
+      return updated;
+    });
+
+    setCurrentIndex(targetIndex);
+    const nextSection = questions[targetIndex].section || "General";
+    if (nextSection !== activeSection) setActiveSection(nextSection);
   };
 
-  // --- UPGRADED: Check if a question has a valid answer based on type ---
+  const handleSectionTabClick = (sec) => {
+    if (sec === activeSection) return;
+    const firstQuestionIndex = questions.findIndex(q => (q.section || "General") === sec);
+    if (firstQuestionIndex !== -1) navigateQuestion(firstQuestionIndex, null);
+  };
+
   const checkHasAnswer = (ansObj, index, qType) => {
     const ans = ansObj[index];
     if (ans === undefined || ans === null) return false;
@@ -315,10 +339,8 @@ export default function ExamInterface() {
     return String(ans).trim() !== '';
   };
 
-  // --- UPGRADED: Handle MSQ, NAT, and MCQ Changes Safely ---
   const handleAnswerChange = (val, type) => {
     const newAnswers = { ...answers };
-    
     if (type === 'MSQ') {
       const currentAns = Array.isArray(newAnswers[currentIndex]) ? newAnswers[currentIndex] : [];
       if (currentAns.includes(val)) {
@@ -332,18 +354,17 @@ export default function ExamInterface() {
     
     setAnswers(newAnswers);
 
-    // Update the local status to reflect changes immediately
-    const updatedStatuses = [...statuses];
-    const hasAns = checkHasAnswer(newAnswers, currentIndex, type);
-    
-    if (updatedStatuses[currentIndex] === 'marked' || updatedStatuses[currentIndex] === 'answered-marked') {
-      updatedStatuses[currentIndex] = hasAns ? 'answered-marked' : 'marked';
-    } else {
-      updatedStatuses[currentIndex] = hasAns ? 'answered' : 'not-answered';
-    }
-    
-    setStatuses(updatedStatuses);
-    saveProgressToCloud(newAnswers, updatedStatuses);
+    setStatuses(prev => {
+      const updated = [...prev];
+      const hasAns = checkHasAnswer(newAnswers, currentIndex, type);
+      if (updated[currentIndex] === 'marked' || updated[currentIndex] === 'answered-marked') {
+        updated[currentIndex] = hasAns ? 'answered-marked' : 'marked';
+      } else {
+        updated[currentIndex] = hasAns ? 'answered' : 'not-answered';
+      }
+      saveProgressToCloud(newAnswers, updated);
+      return updated;
+    });
   };
 
   const clearResponse = () => {
@@ -351,57 +372,54 @@ export default function ExamInterface() {
     delete newAnswers[currentIndex];
     setAnswers(newAnswers);
     
-    const updatedStatuses = [...statuses];
-    // Clearing removes the mark as per TCS iON standards
-    updatedStatuses[currentIndex] = 'not-answered';
-    setStatuses(updatedStatuses);
-    
-    saveProgressToCloud(newAnswers, updatedStatuses);
-  };
-
-  // --- FIXED: Navigation preserves Marks perfectly ---
-  const navigateTo = (newIndex, forceSection = null) => {
-    const updatedStatuses = [...statuses];
-    const currentQType = questions[currentIndex]?.type || 'MCQ';
-    
-    // Only alter the current question if it isn't marked
-    if (updatedStatuses[currentIndex] !== 'marked' && updatedStatuses[currentIndex] !== 'answered-marked') {
-       updatedStatuses[currentIndex] = checkHasAnswer(answers, currentIndex, currentQType) ? 'answered' : 'not-answered';
-    }
-    
-    // Set the new question to not-answered if it was never visited
-    if (updatedStatuses[newIndex] === 'not-visited') {
-      updatedStatuses[newIndex] = 'not-answered';
-    }
-
-    setStatuses(updatedStatuses);
-    setCurrentIndex(newIndex);
-    
-    const nextSection = forceSection || questions[newIndex].section || "General";
-    if (nextSection !== activeSection) setActiveSection(nextSection);
-    saveProgressToCloud(answers, updatedStatuses);
+    setStatuses(prev => {
+      const updated = [...prev];
+      updated[currentIndex] = 'not-answered';
+      saveProgressToCloud(newAnswers, updated);
+      return updated;
+    });
   };
 
   const saveAndNext = () => {
-    const updatedStatuses = [...statuses];
     const currentQType = questions[currentIndex]?.type || 'MCQ';
+    const newStatus = checkHasAnswer(answers, currentIndex, currentQType) ? 'answered' : 'not-answered';
     
-    // Saving clears any mark
-    updatedStatuses[currentIndex] = checkHasAnswer(answers, currentIndex, currentQType) ? 'answered' : 'not-answered';
-    
-    if (currentIndex < questions.length - 1) navigateTo(currentIndex + 1);
-    else { setStatuses(updatedStatuses); saveProgressToCloud(answers, updatedStatuses); }
+    const currentSectionQs = questions.map((q, i) => ({...q, globalIdx: i})).filter(q => (q.section || "General") === activeSection);
+    const isLastInSection = currentSectionQs[currentSectionQs.length - 1].globalIdx === currentIndex;
+
+    if (isLastInSection) {
+      const sectionIdx = uniqueSections.indexOf(activeSection);
+      if (sectionIdx < uniqueSections.length - 1) {
+        const nextSecName = uniqueSections[sectionIdx + 1];
+        const firstInNext = questions.findIndex(q => (q.section || "General") === nextSecName);
+        navigateQuestion(firstInNext, newStatus);
+      } else {
+         navigateQuestion(currentIndex, newStatus); 
+      }
+    } else {
+      if (currentIndex < questions.length - 1) navigateQuestion(currentIndex + 1, newStatus);
+    }
   };
 
   const markAndNext = () => {
-    const updatedStatuses = [...statuses];
     const currentQType = questions[currentIndex]?.type || 'MCQ';
+    const newStatus = checkHasAnswer(answers, currentIndex, currentQType) ? 'answered-marked' : 'marked';
     
-    // Explicitly lock in the mark state
-    updatedStatuses[currentIndex] = checkHasAnswer(answers, currentIndex, currentQType) ? 'answered-marked' : 'marked';
-    
-    if (currentIndex < questions.length - 1) navigateTo(currentIndex + 1);
-    else { setStatuses(updatedStatuses); saveProgressToCloud(answers, updatedStatuses); }
+    const currentSectionQs = questions.map((q, i) => ({...q, globalIdx: i})).filter(q => (q.section || "General") === activeSection);
+    const isLastInSection = currentSectionQs[currentSectionQs.length - 1].globalIdx === currentIndex;
+
+    if (isLastInSection) {
+      const sectionIdx = uniqueSections.indexOf(activeSection);
+      if (sectionIdx < uniqueSections.length - 1) {
+        const nextSecName = uniqueSections[sectionIdx + 1];
+        const firstInNext = questions.findIndex(q => (q.section || "General") === nextSecName);
+        navigateQuestion(firstInNext, newStatus);
+      } else {
+         navigateQuestion(currentIndex, newStatus); 
+      }
+    } else {
+      if (currentIndex < questions.length - 1) navigateQuestion(currentIndex + 1, newStatus);
+    }
   };
 
   const triggerSubmitConfirmation = () => {
@@ -440,7 +458,6 @@ export default function ExamInterface() {
     });
   };
 
-  // --- UPGRADED: AI Scoring Engine for MSQ and NAT ---
   const executeSubmit = async () => {
     setExamPhase('submitting');
     exitFullScreen();
@@ -457,15 +474,12 @@ export default function ExamInterface() {
           if (q.type === 'MSQ') {
             const correctArr = Array.isArray(q.correctAnswer) ? q.correctAnswer : [];
             const studentArr = Array.isArray(studentAns) ? studentAns : [];
-            // Exact match for MSQ
             if (correctArr.length === studentArr.length && correctArr.every(val => studentArr.includes(val))) {
               isCorrect = true;
             }
           } else if (q.type === 'NAT') {
-            // Compare as floats to allow "4.5" to equal "4.50"
             isCorrect = parseFloat(studentAns) === parseFloat(q.correctAnswer);
           } else {
-            // Standard MCQ
             isCorrect = studentAns === q.correctAnswer || studentAns === q.correctOption;
           }
 
@@ -507,19 +521,18 @@ export default function ExamInterface() {
       case 'not-answered': return 'bg-rose-500 text-white clip-not-answered border-rose-600';
       case 'marked': return 'bg-indigo-600 text-white rounded-full border-indigo-700';
       case 'answered-marked': return 'bg-indigo-600 text-white rounded-full relative after:absolute after:bottom-0 after:right-0 after:w-2.5 after:h-2.5 after:bg-emerald-400 after:rounded-full after:border-2 after:border-white';
-      default: return 'bg-slate-100 text-slate-700 border border-slate-300 rounded-md hover:bg-slate-200'; 
+      default: return 'bg-slate-100 text-slate-700 border border-slate-300 rounded-md'; 
     }
   };
 
-  const getStatusCount = (targetStatus) => statuses.filter(s => s === targetStatus || (targetStatus === 'marked' && s === 'answered-marked')).length;
+  const getStatusCount = (targetStatus) => statuses.filter(s => s === targetStatus).length;
 
   if (examPhase === 'loading' || !isLoaded) return <div className="flex h-screen items-center justify-center bg-slate-50"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>;
   if (questions.length === 0) return <div className="p-10 text-center">No questions found for this exam.</div>;
 
-  // --- UI: INSTRUCTIONS PHASE ---
   if (examPhase === 'instructions') {
     return (
-      <div className="bg-slate-50 min-h-screen font-sans flex flex-col items-center py-10 px-4">
+      <div className="bg-slate-50 min-h-screen font-sans flex flex-col items-center py-10 px-4 select-none">
         <div className="max-w-4xl w-full bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200">
           <div className="bg-slate-900 text-white p-6 flex justify-between items-center">
             <h1 className="text-2xl font-bold"><i className="fas fa-clipboard-list text-indigo-400 mr-2"></i> General Instructions</h1>
@@ -532,6 +545,7 @@ export default function ExamInterface() {
               <li>The clock will be set at the server. The countdown timer at the top right of the screen will display the remaining time available for you to complete the examination.</li>
               <li>When the timer reaches zero, the examination will end automatically.</li>
               <li>This examination uses a strict Fullscreen Anti-Cheat mechanism. <strong>Do not attempt to exit fullscreen or press the Back button</strong>, as it will trigger a security warning.</li>
+              <li><strong>Copying text and right-clicking are strictly prohibited.</strong></li>
             </ul>
 
             <h3 className="font-bold text-slate-900 mt-6 text-lg">Question Palette Legend:</h3>
@@ -564,7 +578,6 @@ export default function ExamInterface() {
     );
   }
 
-  // --- UI: SUBMITTING / SUBMITTED PHASE ---
   if (examPhase === 'submitting' || examPhase === 'submitted') {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-900 font-sans p-6 text-center">
@@ -589,14 +602,18 @@ export default function ExamInterface() {
     );
   }
 
-  // --- UI: ACTIVE EXAM PHASE ---
   const currentQ = questions[currentIndex];
   const currentQType = currentQ.type || 'MCQ';
   const currentSectionQuestions = questions.map((q, idx) => ({ ...q, globalIndex: idx })).filter(q => (q.section || "General") === activeSection);
   const localQuestionNumber = currentSectionQuestions.findIndex(q => q.globalIndex === currentIndex) + 1;
 
   return (
-    <div ref={containerRef} className="bg-slate-50 text-slate-900 font-sans h-screen flex flex-col overflow-hidden select-none">
+    <div 
+      ref={containerRef} 
+      className="bg-slate-50 text-slate-900 font-sans h-screen flex flex-col overflow-hidden select-none"
+      onContextMenu={(e) => e.preventDefault()} 
+      onCopy={(e) => e.preventDefault()} 
+    >
       
       <style dangerouslySetInnerHTML={{__html: `
         .clip-answered { clip-path: polygon(100% 0, 100% 75%, 50% 100%, 0 75%, 0 0); }
@@ -608,14 +625,14 @@ export default function ExamInterface() {
       {showCalculator && <DraggableCalculator onClose={() => setShowCalculator(false)} />}
 
       {toast.show && (
-        <div className={`fixed bottom-8 right-8 px-6 py-4 rounded-xl shadow-2xl z-50 flex items-center gap-3 animate-slide-up ${toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
+        <div className={`fixed bottom-8 right-8 px-6 py-4 rounded-xl shadow-2xl z-[99999] flex items-center gap-3 animate-slide-up ${toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
           <i className={`fas ${toast.type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'} text-xl`}></i>
           <span className="font-bold tracking-wide">{toast.message}</span>
         </div>
       )}
 
       {modal.show && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-6">
           <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center">
             <div className={`w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 ${modal.type === 'warning' ? 'bg-rose-100 text-rose-600' : 'bg-indigo-100 text-indigo-600'}`}>
               <i className={`fas ${modal.type === 'warning' ? 'fa-exclamation-triangle' : modal.type === 'info' ? 'fa-info-circle' : 'fa-question-circle'}`}></i>
@@ -642,7 +659,6 @@ export default function ExamInterface() {
         </div>
       )}
 
-      {/* TOP HEADER */}
       <header className="bg-slate-900 text-white p-3 flex justify-between items-center shrink-0 shadow-md z-20">
         <div className="text-xl font-bold flex items-center gap-2">
             <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
@@ -659,10 +675,8 @@ export default function ExamInterface() {
         </div>
       </header>
 
-      {/* MAIN EXAM AREA */}
       <div className={`flex flex-1 overflow-hidden ${modal.show ? 'filter blur-sm pointer-events-none' : ''} transition-all`}>
         
-        {/* LEFT PANEL */}
         <main className="flex-1 flex flex-col bg-white border-r border-slate-300 relative">
           
           <div className="bg-slate-100 pt-2 px-2 flex justify-between items-end border-b border-slate-300 shrink-0">
@@ -698,11 +712,10 @@ export default function ExamInterface() {
                 <p className="mb-6 whitespace-pre-wrap font-bold text-slate-900 leading-relaxed text-lg">{currentQ.text}</p>
                 {currentQ.imageUrl && (
                   <div className="mb-8 p-3 border border-slate-200 rounded-xl bg-slate-50 inline-block shadow-sm">
-                    <img src={currentQ.imageUrl} alt="Diagram" className="max-h-80 object-contain" />
+                    <img src={currentQ.imageUrl} alt="Diagram" className="max-h-80 object-contain pointer-events-none" draggable="false" />
                   </div>
                 )}
                 
-                {/* --- UPGRADED: DYNAMIC QUESTION RENDERER --- */}
                 {currentQType === 'NAT' ? (
                   <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 mt-6 shadow-inner w-full max-w-sm">
                     <label className="block text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">Enter Numerical Value:</label>
@@ -732,7 +745,7 @@ export default function ExamInterface() {
                               />
                               <div>
                                 <span className="block font-bold text-slate-800 text-base">{opt.text}</span>
-                                {opt.imageUrl && <img src={opt.imageUrl} alt={`Option ${opt.id}`} className="max-h-32 mt-3 object-contain border border-slate-200 rounded-lg p-1 bg-white shadow-sm" />}
+                                {opt.imageUrl && <img src={opt.imageUrl} alt={`Option ${opt.id}`} className="max-h-32 mt-3 object-contain border border-slate-200 rounded-lg p-1 bg-white shadow-sm pointer-events-none" draggable="false" />}
                               </div>
                           </label>
                         )
@@ -757,39 +770,98 @@ export default function ExamInterface() {
           </div>
         </main>
 
-        {/* RIGHT PANEL */}
-        <aside className="w-[320px] bg-indigo-50/50 flex flex-col shrink-0 border-l border-slate-200">
-          <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-4">
-            <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Student&background=4F46E5&color=fff"} alt="Candidate" className="w-14 h-14 rounded-lg border border-slate-200 shadow-sm" />
+        {/* RIGHT PANEL - EXAM SUMMARY */}
+        <aside className="w-[320px] bg-slate-50 flex flex-col shrink-0 border-l border-slate-200 overflow-hidden">
+          
+          <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-4 shrink-0">
+            <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Student&background=4F46E5&color=fff"} alt="Candidate" className="w-14 h-14 rounded-lg border border-slate-200 shadow-sm pointer-events-none" />
             <div>
                 <div className="text-[10px] text-slate-400 uppercase tracking-widest font-black mb-0.5">Candidate</div>
                 <div className="text-sm font-bold text-slate-800 truncate w-48">{user?.fullName || "Student"}</div>
             </div>
           </div>
 
-          <div className="p-4 border-b border-slate-200 bg-white grid grid-cols-2 gap-y-4 text-xs font-bold text-slate-600">
-            <div className="flex items-center gap-2"><div className="w-7 h-7 bg-emerald-500 text-white flex items-center justify-center clip-answered border border-emerald-600">{getStatusCount('answered')}</div><span>Answered</span></div>
-            <div className="flex items-center gap-2"><div className="w-7 h-7 bg-rose-500 text-white flex items-center justify-center clip-not-answered border border-rose-600">{getStatusCount('not-answered')}</div><span>Not Answered</span></div>
-            <div className="flex items-center gap-2"><div className="w-7 h-7 bg-slate-100 text-slate-500 border border-slate-300 flex items-center justify-center rounded-md">{getStatusCount('not-visited')}</div><span>Not Visited</span></div>
-            <div className="flex items-center gap-2"><div className="w-7 h-7 bg-indigo-600 text-white flex items-center justify-center rounded-full border border-indigo-700">{getStatusCount('marked')}</div><span>Marked</span></div>
+          {/* --- LIVE EXAM SUMMARY STATS --- */}
+          <div className="p-4 border-b border-slate-200 bg-white shrink-0">
+            <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+              <span className="text-xs font-black text-slate-700 uppercase tracking-widest">Total Questions</span>
+              <span className="text-sm font-black text-indigo-700 bg-indigo-100/50 border border-indigo-200 px-3 py-1 rounded-lg">{questions.length}</span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-y-3 gap-x-3">
+              <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 bg-emerald-500 clip-answered shadow-sm"></div>
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">Answered</span>
+                </div>
+                <span className="text-xs font-black text-slate-900">{getStatusCount('answered')}</span>
+              </div>
+              
+              <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 bg-rose-500 clip-not-answered shadow-sm"></div>
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">Not Ans</span>
+                </div>
+                <span className="text-xs font-black text-slate-900">{getStatusCount('not-answered')}</span>
+              </div>
+              
+              <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 bg-white border border-slate-300 rounded shadow-sm"></div>
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">Not Visited</span>
+                </div>
+                <span className="text-xs font-black text-slate-900">{getStatusCount('not-visited')}</span>
+              </div>
+              
+              <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 bg-indigo-600 rounded-full shadow-sm"></div>
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">Marked</span>
+                </div>
+                <span className="text-xs font-black text-slate-900">{getStatusCount('marked')}</span>
+              </div>
+            </div>
+
+            <div className="mt-3 bg-slate-50 border border-slate-100 p-3 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-6 h-6 bg-indigo-600 rounded-full relative flex shrink-0 shadow-sm after:absolute after:bottom-0 after:right-0 after:w-2 after:h-2 after:bg-emerald-400 after:rounded-full after:border border-white"></div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-slate-700 uppercase">Ans & Marked</span>
+                  <span className="text-[8px] text-slate-500 font-medium tracking-wide">Will be evaluated</span>
+                </div>
+              </div>
+              <span className="text-sm font-black text-slate-900">{getStatusCount('answered-marked')}</span>
+            </div>
           </div>
 
-          <div className="bg-indigo-600 text-white py-2.5 px-4 text-sm font-bold flex justify-between items-center shadow-md z-10">
+          <div className="bg-indigo-600 text-white py-3 px-5 text-sm font-bold flex justify-between items-center shadow-sm z-10 shrink-0">
             <span>{activeSection}</span>
             <span className="bg-indigo-800 px-2 py-0.5 rounded text-xs">{currentSectionQuestions.length} Qs</span>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
+          <div className="flex-1 overflow-y-auto p-5 bg-slate-100/50">
             <div className="grid grid-cols-5 gap-3">
-              {currentSectionQuestions.map((q, localIndex) => (
-                <button 
-                  key={q.globalIndex}
-                  onClick={() => navigateTo(q.globalIndex)}
-                  className={`w-11 h-11 font-black flex items-center justify-center hover:opacity-80 transition transform hover:scale-105 shadow-sm ${getPaletteClass(statuses[q.globalIndex])}`}
-                >
-                  {localIndex + 1}
-                </button>
-              ))}
+              {currentSectionQuestions.map((q, localIndex) => {
+                const isCurrent = q.globalIndex === currentIndex;
+                return (
+                  <div 
+                    key={q.globalIndex} 
+                    className={`relative flex items-center justify-center w-12 h-12 rounded-lg transition-all 
+                      ${isCurrent ? 'bg-slate-300 border-2 border-slate-500 shadow-inner' : ''}
+                    `}
+                  >
+                    <button 
+                      onClick={() => navigateQuestion(q.globalIndex)}
+                      className={`w-10 h-10 font-black flex items-center justify-center transition-transform shadow-sm
+                        ${getPaletteClass(statuses[q.globalIndex])}
+                        ${isCurrent ? 'scale-105 z-10 shadow-md' : 'hover:opacity-80 hover:scale-105'}
+                      `}
+                    >
+                      {localIndex + 1}
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           </div>
 

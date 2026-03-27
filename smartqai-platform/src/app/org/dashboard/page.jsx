@@ -15,9 +15,11 @@ export default function OrgDashboardPage() {
   const [isLoadingExams, setIsLoadingExams] = useState(true);
   const [copiedId, setCopiedId] = useState(null);
 
-  // --- NEW: Custom Delete Modal State ---
+  // UI States
   const [examToDelete, setExamToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Security Redirect
   useEffect(() => {
@@ -56,22 +58,14 @@ export default function OrgDashboardPage() {
     setTimeout(() => setCopiedId(null), 3000);
   };
 
-  // --- NEW: Custom Delete Execution ---
   const confirmDeleteExam = async () => {
     if (!examToDelete) return;
     setIsDeleting(true);
-
     try {
-      // 1. Delete from Firebase
       await deleteDoc(doc(db, "mocks", examToDelete));
-      
-      // 2. Remove from local UI state instantly
       setRecentExams(prev => prev.filter(exam => exam.id !== examToDelete));
-      
-      // 3. Close Modal
       setExamToDelete(null);
     } catch (error) {
-      console.error("Failed to delete exam:", error);
       alert("Error deleting exam. Please try again.");
     } finally {
       setIsDeleting(false);
@@ -82,40 +76,72 @@ export default function OrgDashboardPage() {
     return <div className="flex h-screen items-center justify-center bg-slate-50"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>;
   }
 
+  const hasNoExams = recentExams.length === 0 && !isLoadingExams;
+
   return (
-    <div className="flex h-screen bg-slate-50 font-sans relative overflow-hidden">
+    <div className="flex h-screen bg-slate-50 font-sans relative overflow-hidden w-full">
       
+      {/* --- TUTORIAL / QUICK GUIDE MODAL --- */}
+      {showTutorial && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-[1.5rem] md:rounded-[2rem] shadow-2xl max-w-2xl w-full overflow-hidden border border-slate-200 max-h-[90vh] flex flex-col">
+            <div className="bg-indigo-600 p-6 md:p-8 text-white flex justify-between items-center relative overflow-hidden shrink-0">
+              <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
+              <div>
+                <h2 className="text-xl md:text-2xl font-black relative z-10">Platform Interface Guide</h2>
+                <p className="text-indigo-200 mt-1 font-medium relative z-10 text-xs md:text-sm">Understand exactly what each button does.</p>
+              </div>
+              <button onClick={() => setShowTutorial(false)} className="w-8 h-8 md:w-10 md:h-10 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition relative z-10 shrink-0 ml-4">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            
+            <div className="p-4 md:p-8 space-y-4 md:space-y-6 overflow-y-auto">
+              <div className="flex flex-col sm:flex-row gap-3 md:gap-4 items-start p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                <div className="w-10 h-10 md:w-12 md:h-12 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center text-lg md:text-xl shrink-0"><i className="fas fa-plus"></i></div>
+                <div>
+                  <h3 className="font-black text-slate-800 mb-1 text-sm md:text-base">New Exam Button (Top Right)</h3>
+                  <p className="text-xs md:text-sm font-medium text-slate-600">Opens the Exam Studio. Here you upload your PDFs, let the AI extract questions, and publish the test securely to our servers.</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 md:gap-4 items-start p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                <div className="w-10 h-10 md:w-12 md:h-12 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center text-lg md:text-xl shrink-0"><i className="fas fa-code"></i></div>
+                <div>
+                  <h3 className="font-black text-slate-800 mb-1 text-sm md:text-base">Copy Embed Code (Dashboard)</h3>
+                  <p className="text-xs md:text-sm font-medium text-slate-600">Generates an HTML iframe snippet. Send this code to your IT team to paste onto your school's website.</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 md:gap-4 items-start p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                <div className="w-10 h-10 md:w-12 md:h-12 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center text-lg md:text-xl shrink-0"><i className="fas fa-chart-line"></i></div>
+                <div>
+                  <h3 className="font-black text-slate-800 mb-1 text-sm md:text-base">View Results & Leads (Dashboard)</h3>
+                  <p className="text-xs md:text-sm font-medium text-slate-600">Opens the Analytics Room. View every student who took the test, their phone numbers, email addresses, and scorecards.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- ENTERPRISE DELETE MODAL --- */}
       {examToDelete && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
-          <div className="bg-white rounded-[2rem] shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
-            
+          <div className="bg-white rounded-[1.5rem] md:rounded-[2rem] shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
             <div className="bg-rose-50 p-6 text-center border-b border-rose-100">
-              <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-4 shadow-sm border border-rose-200">
+              <div className="w-14 h-14 md:w-16 md:h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center text-2xl md:text-3xl mx-auto mb-4 shadow-sm border border-rose-200">
                 <i className="fas fa-exclamation-triangle"></i>
               </div>
-              <h2 className="text-2xl font-black text-rose-900 mb-1">Delete Exam?</h2>
-              <p className="text-rose-700/80 font-bold text-sm">This action cannot be undone.</p>
+              <h2 className="text-xl md:text-2xl font-black text-rose-900 mb-1">Delete Exam?</h2>
             </div>
-
             <div className="p-6 md:p-8">
-              <p className="text-sm font-medium text-slate-600 mb-6 text-center leading-relaxed">
+              <p className="text-xs md:text-sm font-medium text-slate-600 mb-6 text-center leading-relaxed">
                 Are you absolutely sure you want to delete this exam? Any student currently taking it will be instantly kicked out, and <strong className="text-rose-600">all associated leads and analytics will be permanently lost.</strong>
               </p>
-
-              <div className="flex gap-4">
-                <button 
-                  onClick={() => setExamToDelete(null)} 
-                  disabled={isDeleting}
-                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3.5 rounded-xl font-bold transition disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={confirmDeleteExam} 
-                  disabled={isDeleting}
-                  className="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-3.5 rounded-xl font-black shadow-lg shadow-rose-600/20 transition flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-                >
+              <div className="flex flex-col sm:flex-row gap-3 md:gap-4">
+                <button onClick={() => setExamToDelete(null)} disabled={isDeleting} className="w-full sm:flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 md:py-3.5 rounded-xl font-bold transition text-sm">Cancel</button>
+                <button onClick={confirmDeleteExam} disabled={isDeleting} className="w-full sm:flex-1 bg-rose-600 hover:bg-rose-700 text-white py-3 md:py-3.5 rounded-xl font-black shadow-lg transition flex items-center justify-center gap-2 text-sm">
                   {isDeleting ? <><i className="fas fa-spinner fa-spin"></i> Deleting...</> : <><i className="fas fa-trash-alt"></i> Yes, Delete</>}
                 </button>
               </div>
@@ -124,9 +150,26 @@ export default function OrgDashboardPage() {
         </div>
       )}
 
-      {/* B2B ENTERPRISE SIDEBAR */}
-      <aside className="w-64 bg-slate-900 text-white flex flex-col shrink-0 z-50">
-        <div className="h-20 flex items-center px-6 border-b border-slate-800">
+      {/* --- MOBILE SIDEBAR OVERLAY --- */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 lg:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        ></div>
+      )}
+
+      {/* --- B2B ENTERPRISE SIDEBAR (Responsive) --- */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-64 md:w-72 bg-slate-900 text-white flex flex-col shrink-0 transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0 ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
+        
+        {/* Mobile Close Button */}
+        <button 
+          onClick={() => setIsMobileMenuOpen(false)}
+          className="absolute top-4 right-4 text-slate-400 hover:text-white lg:hidden w-8 h-8 flex items-center justify-center bg-slate-800 rounded-lg"
+        >
+          <i className="fas fa-times"></i>
+        </button>
+
+        <div className="h-20 flex items-center px-4 md:px-6 border-b border-slate-800 pt-4 lg:pt-0">
           <OrganizationSwitcher 
             hidePersonal={true}
             appearance={{
@@ -137,118 +180,170 @@ export default function OrgDashboardPage() {
             }}
           />
         </div>
-        
-        <nav className="flex-1 p-4 space-y-2 mt-4">
-            <button className="w-full flex items-center gap-3 bg-indigo-600 text-white p-3 rounded-xl text-sm font-bold shadow-md shadow-indigo-900/20">
-                <i className="fas fa-chart-pie w-5"></i> Overview
+        <nav className="flex-1 p-4 space-y-2 mt-2">
+            <button className="w-full flex items-center gap-3 bg-indigo-600 text-white p-3 md:p-3.5 rounded-xl text-sm font-bold shadow-md shadow-indigo-900/20 transition hover:bg-indigo-500">
+                <i className="fas fa-chart-pie w-5 text-center"></i> Overview
             </button>
-            <button onClick={() => router.push('/org/create-mock')} className="w-full flex items-center gap-3 text-slate-400 hover:bg-slate-800 hover:text-white p-3 rounded-xl text-sm font-bold transition">
-                <i className="fas fa-file-pdf w-5"></i> White-Label Exams
+            <button onClick={() => router.push('/org/create-mock')} className="w-full flex items-center gap-3 text-slate-400 hover:bg-slate-800 hover:text-white p-3 md:p-3.5 rounded-xl text-sm font-bold transition">
+                <i className="fas fa-file-pdf w-5 text-center"></i> White-Label Exams
             </button>
-            <button className="w-full flex items-center gap-3 text-slate-400 hover:bg-slate-800 hover:text-white p-3 rounded-xl text-sm font-bold transition opacity-50 cursor-not-allowed" title="Coming Soon">
-                <i className="fas fa-users w-5"></i> Team Management
+            
+            {/* NEW BRAND SETTINGS BUTTON */}
+            <button onClick={() => router.push('/org/settings')} className="w-full flex items-center gap-3 text-slate-400 hover:bg-slate-800 hover:text-white p-3 md:p-3.5 rounded-xl text-sm font-bold transition">
+                <i className="fas fa-palette w-5 text-center"></i> Brand Settings
+            </button>
+            
+            <button className="w-full flex items-center gap-3 text-slate-400 hover:bg-slate-800 hover:text-white p-3 md:p-3.5 rounded-xl text-sm font-bold transition opacity-50 cursor-not-allowed">
+                <i className="fas fa-users w-5 text-center"></i> Team (Coming Soon)
             </button>
         </nav>
+        
+        {/* Organization Brand Footer */}
+        <div className="p-6 border-t border-slate-800 text-center">
+           <div className="inline-flex items-center gap-2 text-slate-500 text-[10px] font-black uppercase tracking-widest">
+             <i className="fas fa-shield-alt text-indigo-500"></i> Enterprise Secured
+           </div>
+        </div>
       </aside>
 
-      <main className="flex-1 flex flex-col overflow-y-auto">
+      <main className="flex-1 flex flex-col overflow-y-auto relative w-full">
         
-        {/* HEADER */}
-        <header className="bg-white border-b border-slate-200 h-20 px-8 flex justify-between items-center z-10 shrink-0 sticky top-0">
-          <div>
-            <h1 className="text-2xl font-black text-slate-900">{organization.name} Dashboard</h1>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Enterprise Portal</p>
+        {/* --- HEADER --- */}
+        <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 h-16 md:h-20 px-4 md:px-8 flex justify-between items-center z-10 shrink-0 sticky top-0 shadow-sm">
+          
+          <div className="flex items-center gap-3 md:gap-4">
+            {/* Hamburger Mobile Menu */}
+            <button 
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="lg:hidden text-slate-600 hover:text-indigo-600 transition w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center"
+            >
+              <i className="fas fa-bars"></i>
+            </button>
+
+            <div className="hidden sm:block">
+              <h1 className="text-lg md:text-2xl font-black text-slate-900 truncate max-w-[150px] md:max-w-md">{organization.name} Dashboard</h1>
+              <p className="text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-widest mt-0.5">Enterprise Portal</p>
+            </div>
+            {/* Mobile Title (Compact) */}
+            <div className="block sm:hidden">
+              <h1 className="text-base font-black text-slate-900 truncate max-w-[120px]">{organization.name}</h1>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-             <button onClick={() => router.push('/org/create-mock')} className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg text-sm font-bold border border-indigo-200 hover:bg-indigo-100 hover:shadow-sm transition">
-               <i className="fas fa-plus mr-2"></i> New Exam
+
+          <div className="flex items-center gap-2 md:gap-4">
+             {/* Guide Button */}
+             <button onClick={() => setShowTutorial(true)} className="hidden sm:flex text-slate-500 hover:text-indigo-600 text-sm font-bold transition items-center gap-2 mr-2">
+               <i className="far fa-question-circle"></i> Guide
              </button>
-             <div className="h-8 w-px bg-slate-200"></div>
+             
+             {/* PULSING NEW EXAM BUTTON */}
+             <button onClick={() => router.push('/org/create-mock')} className={`px-3 md:px-4 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition flex items-center gap-2 relative shrink-0 ${hasNoExams ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30 ring-4 ring-indigo-100 hover:bg-indigo-700' : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'}`}>
+               {hasNoExams && <span className="absolute -top-1 -right-1 flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span></span>}
+               <i className="fas fa-plus"></i> <span className="hidden sm:inline">New Exam</span><span className="sm:hidden">New</span>
+             </button>
+             
+             <div className="h-6 md:h-8 w-px bg-slate-200 mx-1 md:mx-2"></div>
              <UserButton afterSignOutUrl="/" />
           </div>
         </header>
 
-        {/* CONTENT */}
-        <div className="p-8 max-w-6xl mx-auto w-full space-y-8">
+        {/* --- CONTENT AREA --- */}
+        <div className="p-4 md:p-8 max-w-6xl mx-auto w-full space-y-6 md:space-y-8">
           
           {/* QUICK STATS */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-               <div className="flex items-center gap-3 mb-2 text-slate-500"><i className="fas fa-file-alt text-indigo-500"></i> <h3 className="font-bold text-sm uppercase">Active Exams</h3></div>
-               <span className="text-4xl font-black text-slate-900">{isLoadingExams ? "-" : recentExams.length}</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+            <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 hover:-translate-y-1 transition-transform duration-300">
+               <div className="flex items-center gap-3 mb-2 text-slate-500"><i className="fas fa-file-alt text-indigo-500 bg-indigo-50 p-2 rounded-lg"></i> <h3 className="font-bold text-xs md:text-sm uppercase tracking-wide">Active Exams</h3></div>
+               <span className="text-3xl md:text-4xl font-black text-slate-900">{isLoadingExams ? "-" : recentExams.length}</span>
             </div>
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 opacity-70">
-               <div className="flex items-center gap-3 mb-2 text-slate-500"><i className="fas fa-user-graduate text-emerald-500"></i> <h3 className="font-bold text-sm uppercase">Total Leads Collected</h3></div>
-               <span className="text-xl font-bold text-slate-400">Available in Pro</span>
+            <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 opacity-80 relative overflow-hidden">
+               <div className="absolute top-2 right-2 bg-slate-100 text-slate-400 text-[8px] font-black px-2 py-1 rounded uppercase">Pro</div>
+               <div className="flex items-center gap-3 mb-2 text-slate-500"><i className="fas fa-user-graduate text-emerald-500 bg-emerald-50 p-2 rounded-lg"></i> <h3 className="font-bold text-xs md:text-sm uppercase tracking-wide">Total Leads</h3></div>
+               <span className="text-xl md:text-2xl font-bold text-slate-300 tracking-tight">Locked</span>
             </div>
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 opacity-70">
-               <div className="flex items-center gap-3 mb-2 text-slate-500"><i className="fas fa-shield-alt text-rose-500"></i> <h3 className="font-bold text-sm uppercase">Avg. Cheat Rate</h3></div>
-               <span className="text-xl font-bold text-slate-400">Available in Pro</span>
+            <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 opacity-80 relative overflow-hidden sm:col-span-2 md:col-span-1">
+               <div className="absolute top-2 right-2 bg-slate-100 text-slate-400 text-[8px] font-black px-2 py-1 rounded uppercase">Pro</div>
+               <div className="flex items-center gap-3 mb-2 text-slate-500"><i className="fas fa-shield-alt text-rose-500 bg-rose-50 p-2 rounded-lg"></i> <h3 className="font-bold text-xs md:text-sm uppercase tracking-wide">Avg Cheat Rate</h3></div>
+               <span className="text-xl md:text-2xl font-bold text-slate-300 tracking-tight">Locked</span>
             </div>
           </div>
 
-          {/* ACTION BANNER */}
-          {recentExams.length === 0 && !isLoadingExams && (
-            <div className="bg-gradient-to-r from-indigo-900 to-slate-900 rounded-3xl p-8 md:p-10 text-white shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center justify-between border border-indigo-500/30">
-              <div className="absolute -right-20 -top-20 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"></div>
-              <div className="relative z-10 max-w-xl mb-6 md:mb-0">
-                 <span className="bg-emerald-500 text-white text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest mb-4 inline-block">Getting Started</span>
-                 <h2 className="text-3xl font-black mb-3">Deploy your first Exam</h2>
-                 <p className="text-indigo-200 text-sm font-medium leading-relaxed">
-                   Upload a PDF, generate questions, and get a secure white-label HTML snippet to embed on your website. Start collecting student leads today.
-                 </p>
+          {/* --- INTERACTIVE ONBOARDING EMPTY STATE --- */}
+          {hasNoExams && (
+            <div className="bg-white rounded-[1.5rem] md:rounded-[2rem] border-2 border-slate-200 p-6 sm:p-10 md:p-14 shadow-xl relative overflow-hidden text-center">
+              
+              <div className="w-16 h-16 md:w-20 md:h-20 bg-indigo-50 text-indigo-600 rounded-2xl md:rounded-3xl flex items-center justify-center text-3xl md:text-4xl mx-auto mb-4 md:mb-6 shadow-inner border border-indigo-100">
+                <i className="fas fa-rocket"></i>
               </div>
-              <button onClick={() => router.push('/org/create-mock')} className="relative z-10 shrink-0 bg-white text-indigo-900 px-8 py-4 rounded-xl font-black shadow-xl hover:scale-105 hover:shadow-indigo-500/20 transition-all flex items-center gap-3">
-                <i className="fas fa-magic"></i> Open Exam Studio
-              </button>
+              <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3 md:mb-4">Welcome to your Enterprise Hub</h2>
+              <p className="text-sm md:text-lg text-slate-500 font-medium max-w-2xl mx-auto mb-8 md:mb-12 px-4">
+                Turn your institution's website into a lead generation machine. Here is how your workflow operates:
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 relative">
+                
+                {/* Connecting Line (Desktop Only) */}
+                <div className="hidden md:block absolute top-1/2 left-[15%] right-[15%] h-1 bg-slate-100 -translate-y-1/2 z-0 border-t-2 border-dashed border-slate-300"></div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 md:p-6 relative z-10 hover:-translate-y-2 transition-transform duration-300 shadow-sm">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-white rounded-full flex items-center justify-center text-indigo-600 font-black text-lg md:text-xl mx-auto mb-3 md:mb-4 shadow-sm border border-slate-200">1</div>
+                  <h3 className="font-black text-slate-800 mb-1.5 md:mb-2 text-sm md:text-base">Create Exam</h3>
+                  <p className="text-[11px] md:text-xs font-bold text-slate-500 leading-relaxed">Upload a PDF. Our AI extracts the questions instantly. Publish it to our secure servers.</p>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 md:p-6 relative z-10 hover:-translate-y-2 transition-transform duration-300 shadow-sm">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-white rounded-full flex items-center justify-center text-emerald-600 font-black text-lg md:text-xl mx-auto mb-3 md:mb-4 shadow-sm border border-slate-200">2</div>
+                  <h3 className="font-black text-slate-800 mb-1.5 md:mb-2 text-sm md:text-base">Embed on Website</h3>
+                  <p className="text-[11px] md:text-xs font-bold text-slate-500 leading-relaxed">Copy the HTML iframe code we provide and paste it onto your school's website.</p>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 md:p-6 relative z-10 hover:-translate-y-2 transition-transform duration-300 shadow-sm">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-white rounded-full flex items-center justify-center text-rose-600 font-black text-lg md:text-xl mx-auto mb-3 md:mb-4 shadow-sm border border-slate-200">3</div>
+                  <h3 className="font-black text-slate-800 mb-1.5 md:mb-2 text-sm md:text-base">Collect Leads</h3>
+                  <p className="text-[11px] md:text-xs font-bold text-slate-500 leading-relaxed">Students take the exam on your site. You get their emails, phone numbers, and anti-cheat data.</p>
+                </div>
+              </div>
+
+              <div className="mt-10 md:mt-16 animate-bounce">
+                <i className="fas fa-arrow-up text-2xl md:text-3xl text-indigo-300"></i>
+                <p className="text-xs md:text-sm font-black text-indigo-500 mt-2 uppercase tracking-widest">Click "New Exam" to start</p>
+              </div>
             </div>
           )}
 
-          {/* THE RECENT EXAMS TABLE */}
+          {/* THE RECENT EXAMS TABLE (Responsive) */}
           {recentExams.length > 0 && (
-            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-               <div className="bg-slate-50 border-b border-slate-200 p-6 flex justify-between items-center">
-                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-wide"><i className="fas fa-database text-indigo-500 mr-2"></i> Deployed Exams</h2>
+            <div className="bg-white rounded-2xl md:rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+               <div className="bg-slate-50 border-b border-slate-200 p-4 md:p-6 flex justify-between items-center">
+                 <h2 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-wide flex items-center"><i className="fas fa-database text-indigo-500 mr-2 text-lg"></i> Deployed Exams</h2>
                </div>
                
                <div className="divide-y divide-slate-100">
                  {recentExams.map(exam => (
-                   <div key={exam.id} className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-slate-50/50 transition">
+                   <div key={exam.id} className="p-4 md:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4 md:gap-6 hover:bg-slate-50/50 transition">
                      
-                     <div className="flex-1">
-                       <h3 className="font-black text-slate-900 text-lg mb-1">{exam.title}</h3>
-                       <div className="flex flex-wrap items-center gap-3 text-xs font-bold text-slate-500">
-                          <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-100">{exam.examCategory || "General"}</span>
-                          <span><i className="far fa-clock mr-1"></i> {exam.duration} mins</span>
-                          <span><i className="far fa-calendar-alt mr-1"></i> {exam.createdAt?.toDate().toLocaleDateString() || "Recently"}</span>
-                          <span className="text-slate-400 font-mono bg-slate-100 px-2 rounded">ID: {exam.id}</span>
+                     <div className="flex-1 w-full">
+                       <h3 className="font-black text-slate-900 text-base md:text-lg mb-2">{exam.title}</h3>
+                       <div className="flex flex-wrap items-center gap-2 md:gap-3 text-[10px] md:text-xs font-bold text-slate-500">
+                          <span className="bg-indigo-50 text-indigo-700 px-2 py-1 md:py-0.5 rounded border border-indigo-100 uppercase tracking-wider">{exam.examCategory || "General"}</span>
+                          <span className="bg-slate-50 border border-slate-200 px-2 py-1 md:py-0.5 rounded"><i className="far fa-clock mr-1 text-slate-400"></i> {exam.duration} mins</span>
+                          <span className="bg-slate-50 border border-slate-200 px-2 py-1 md:py-0.5 rounded"><i className="far fa-calendar-alt mr-1 text-slate-400"></i> {exam.createdAt?.toDate().toLocaleDateString() || "Recently"}</span>
+                          <span className="text-slate-400 font-mono bg-slate-100 px-2 py-1 md:py-0.5 rounded border border-slate-200">ID: {exam.id}</span>
                        </div>
                      </div>
                      
-                     <div className="flex flex-wrap items-center gap-3 shrink-0">
+                     {/* Action Buttons - Stacked on Mobile, Row on Desktop */}
+                     <div className="flex flex-row flex-wrap lg:flex-nowrap items-center gap-2 md:gap-3 shrink-0 w-full lg:w-auto mt-2 lg:mt-0">
                        
-                       {/* COPY IFRAME BUTTON */}
-                       <button 
-                         onClick={() => copyIframeCode(exam.id)} 
-                         className={`px-4 py-2.5 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-2 border ${copiedId === exam.id ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
-                       >
-                         {copiedId === exam.id ? <><i className="fas fa-check"></i> Copied HTML</> : <><i className="fas fa-code"></i> Copy Embed</>}
+                       <button onClick={() => copyIframeCode(exam.id)} className={`flex-1 lg:flex-none px-3 md:px-4 py-2.5 md:py-2.5 rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-2 border ${copiedId === exam.id ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}>
+                         {copiedId === exam.id ? <><i className="fas fa-check"></i> Copied</> : <><i className="fas fa-code"></i> Embed</>}
                        </button>
 
-                       {/* VIEW RESULTS BUTTON */}
-                       <button 
-                         onClick={() => router.push(`/org/live-rooms/${exam.id}`)} 
-                         className="bg-slate-900 hover:bg-indigo-600 text-white px-6 py-2.5 rounded-xl text-xs font-black shadow-md transition flex items-center gap-2"
-                       >
-                         <i className="fas fa-chart-line"></i> View Results & Leads
+                       <button onClick={() => router.push(`/org/live-rooms/${exam.id}`)} className="flex-[2] lg:flex-none bg-slate-900 hover:bg-indigo-600 text-white px-4 md:px-6 py-2.5 md:py-2.5 rounded-xl text-xs font-black shadow-md transition flex items-center justify-center gap-2">
+                         <i className="fas fa-chart-line"></i> <span className="hidden sm:inline">View Results & Leads</span><span className="sm:hidden">Results</span>
                        </button>
 
-                       {/* NEW: BEAUTIFUL DELETE BUTTON */}
-                       <button 
-                         onClick={() => setExamToDelete(exam.id)} 
-                         className="px-3 py-2.5 rounded-xl text-xs font-black text-slate-400 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 border border-transparent transition flex items-center justify-center"
-                         title="Delete Exam"
-                       >
+                       <button onClick={() => setExamToDelete(exam.id)} className="px-3 py-2.5 rounded-xl text-xs font-black text-slate-400 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 border border-slate-200 lg:border-transparent transition flex items-center justify-center" title="Delete Exam">
                          <i className="fas fa-trash"></i>
                        </button>
                      </div>

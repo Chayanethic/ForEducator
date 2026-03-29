@@ -99,7 +99,7 @@ export async function POST(request) {
     }
 
     // ==========================================
-    // THE AI FORMATTER (With Anti-Skipping Directives)
+    // THE AI FORMATTER (With Strict Schema Enforcement)
     // ==========================================
     const model = genAI.getGenerativeModel({ 
       model: "gemini-2.5-flash", 
@@ -110,32 +110,42 @@ export async function POST(request) {
       }
     });
 
+    // ⚡ NEW BULLETPROOF PROMPT WITH JSON SCHEMA ⚡
     const prompt = `
       You are an expert exam extraction AI. I am providing you with an exam document.
       Your job is to extract the questions into a strict JSON array.
 
-      CRITICAL ORDERING & ANTI-SKIPPING RULES (STRICTLY ENFORCED):
-      1. You MUST extract EVERY SINGLE QUESTION in STRICT NUMERICAL ORDER (e.g., Q1, then Q2, then Q3).
-      2. DO NOT SKIP ANY NUMBERS. If you extract Q1 and Q3, you have failed. You MUST find Q2 and extract it before Q3.
+      CRITICAL RULE: You MUST extract the actual question text itself. Do not just extract the options.
+
+      CRITICAL ORDERING & ANTI-SKIPPING RULES:
+      1. Extract EVERY SINGLE QUESTION in STRICT NUMERICAL ORDER.
+      2. DO NOT SKIP ANY NUMBERS. 
       3. TWO-COLUMN LAYOUTS: Exam papers often use two columns. If the numbers jump suddenly, read the other column!
-      4. Ensure the final JSON array is sorted sequentially by question number.
 
       ADVANCED MATH & LATEX RULES:
       1. Use strict, textbook-quality LaTeX for all equations.
-      2. NEVER use inline slashes for complex fractions. Instead of $V_{GS}/2.1 V_t$, you MUST use \\frac{V_{GS}}{2.1 V_t}.
-      3. Use \\left( and \\right) for scaling parentheses.
-      4. Always use \\times for multiplication, never "x".
-      5. Escape all JSON backslashes (e.g., \\\\frac).
+      2. Escape all JSON backslashes (e.g., \\\\frac).
 
-      DATA STRUCTURE RULES:
-      1. Extract ALL questions.
-      2. type: "MCQ", "MSQ", or "NAT".
-      3. options: Provide 4 options. If NAT, output [].
-      4. correctAnswer: ID of correct option (A,B,C,D) or numeric answer.
-      5. explanation: ${generateExplanations ? 'Provide a brief step-by-step solution.' : 'Hardcode as ""'}
-      6. hasImage: false, imageUrl: ""
+      STRICT JSON SCHEMA REQUIREMENT:
+      You MUST return an array of objects exactly matching this structure. Use these exact keys:
+      [
+        {
+          "text": "The full text of the question goes here. DO NOT leave this blank.",
+          "type": "MCQ", // Or "MSQ" or "NAT"
+          "options": [
+            { "id": "A", "text": "Option 1 text" },
+            { "id": "B", "text": "Option 2 text" },
+            { "id": "C", "text": "Option 3 text" },
+            { "id": "D", "text": "Option 4 text" }
+          ], // If NAT, output an empty array []
+          "correctAnswer": "A", // Or the numeric value if NAT
+          "explanation": "${generateExplanations ? 'Brief step-by-step solution.' : ''}",
+          "hasImage": false,
+          "imageUrl": null
+        }
+      ]
 
-      Output ONLY a valid JSON array of objects.
+      Output ONLY a valid JSON array matching the schema above.
     `;
 
     // Add prompt to the beginning of the payload array

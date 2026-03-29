@@ -11,13 +11,14 @@ import Latex from 'react-latex-next';
 export default function IframeStudentPlayer({ params }) {
   const unwrappedParams = use(params);
   const mockId = unwrappedParams.id;
-  const playerRef = useRef(null); // Ref for full-screen wrapper
+  const playerRef = useRef(null); 
 
   // Exam & Student Data
   const [examData, setExamData] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [studentInfo, setStudentInfo] = useState({ name: "", email: "", phone: "" });
+  const [formError, setFormError] = useState(""); // ⚡ NEW: Form Error State
   
   // Exam Engine State
   const [hasStarted, setHasStarted] = useState(false);
@@ -30,11 +31,13 @@ export default function IframeStudentPlayer({ params }) {
   const [visited, setVisited] = useState({});
   const [markedForReview, setMarkedForReview] = useState({});
   
-  // Security State
+  // Security & UI Modal State
   const [warnings, setWarnings] = useState(0);
   const MAX_WARNINGS = 3;
+  const [warningAlert, setWarningAlert] = useState({ show: false, reason: "", count: 0, isFinal: false });
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
 
-  // 1. Fetch Exam Data (NOW POWERED BY REDIS CACHING ⚡)
+  // 1. Fetch Exam Data
   useEffect(() => {
     const fetchExam = async () => {
       try {
@@ -46,7 +49,6 @@ export default function IframeStudentPlayer({ params }) {
         setQuestions(data.questions);
         setTimeLeft(data.examData.duration * 60);
         
-        // Mark first question as visited
         if (data.questions.length > 0) setVisited({ 0: true });
 
       } catch (error) {
@@ -80,51 +82,45 @@ export default function IframeStudentPlayer({ params }) {
       setWarnings(prev => {
         const newWarnings = prev + 1;
         if (newWarnings >= MAX_WARNINGS) {
-          alert(`SECURITY VIOLATION: ${reason}. Maximum warnings reached. Auto-submitting exam.`);
-          submitExam(true);
+          setWarningAlert({ show: true, reason, count: newWarnings, isFinal: true });
+          setTimeout(() => submitExam(true), 3000); 
         } else {
-          alert(`WARNING (${newWarnings}/${MAX_WARNINGS}): ${reason}. Do not leave the exam window!`);
+          setWarningAlert({ show: true, reason, count: newWarnings, isFinal: false });
         }
         return newWarnings;
       });
     };
 
-    // A. Detect Tab Switching
     const handleVisibilityChange = () => {
       if (document.hidden) issueWarning("Tab switching detected");
     };
 
-    // B. Detect Split Screen / Window clicking
     const handleBlur = () => {
       issueWarning("Window focus lost (Possible split-screen or external app clicked)");
     };
 
-    // C. Enforce Full Screen
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) {
+      if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
         issueWarning("Exited full screen mode");
       }
     };
 
-    // D. Block Keyboard Shortcuts (PrintScreen, Copy, Inspect)
     const handleKeyDown = (e) => {
-      // PrintScreen Key
       if (e.key === 'PrintScreen' || e.keyCode === 44) {
-        navigator.clipboard.writeText(''); // Clear clipboard instantly
+        navigator.clipboard.writeText(''); 
         issueWarning("Screenshot attempt detected");
         e.preventDefault();
       }
-      // Ctrl+C, Cmd+C, F12, Ctrl+Shift+I
       if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'v' || e.key === 'p')) e.preventDefault();
       if (e.key === 'F12' || ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'I')) e.preventDefault();
     };
 
-    // E. Block Right Click & Text Selection
     const preventAction = (e) => e.preventDefault();
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("blur", handleBlur);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange); 
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("contextmenu", preventAction);
     document.addEventListener("copy", preventAction);
@@ -133,6 +129,7 @@ export default function IframeStudentPlayer({ params }) {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("contextmenu", preventAction);
       document.removeEventListener("copy", preventAction);
@@ -140,18 +137,45 @@ export default function IframeStudentPlayer({ params }) {
   }, [hasStarted, isFinished]);
 
   // ==========================================
-  // EXAM CONTROLS
+  // EXAM CONTROLS & FORM VALIDATION
   // ==========================================
 
-  const startSecureExam = async (e) => {
+  const startSecureExam = (e) => {
     e.preventDefault();
+    setFormError(""); // Reset previous errors
+
+    // ⚡ STRICT FORM VALIDATION ⚡
+    const { name, email, phone } = studentInfo;
+    
+    if (name.trim().length < 3) {
+      setFormError("Please enter your full, real name.");
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setFormError("Please enter a valid email address (e.g., student@gmail.com).");
+      return;
+    }
+
+    const phoneClean = phone.replace(/\D/g, ''); // Strip all non-numeric characters
+    if (phoneClean.length < 10 || phoneClean.length > 15) {
+      setFormError("Please enter a valid 10-digit mobile number.");
+      return;
+    }
+
+    // If validation passes, request fullscreen and start!
+    const elem = playerRef.current || document.documentElement;
     try {
-      // Force Fullscreen Request
-      if (playerRef.current && playerRef.current.requestFullscreen) {
-        await playerRef.current.requestFullscreen();
+      if (elem.requestFullscreen) {
+        elem.requestFullscreen().catch(err => console.warn(err));
+      } else if (elem.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen();
+      } else if (elem.msRequestFullscreen) {
+        elem.msRequestFullscreen();
       }
     } catch (err) {
-      console.warn("Fullscreen denied. They must be viewing inside an iframe without allow='fullscreen'");
+      console.warn("Fullscreen API issue:", err);
     }
     setHasStarted(true);
   };
@@ -189,9 +213,14 @@ export default function IframeStudentPlayer({ params }) {
 
   const submitExam = async (isForced = false) => {
     setIsFinished(true);
+    setShowSubmitConfirm(false);
     
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(e => console.log(e));
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(e => console.log(e));
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      }
     }
 
     let score = 0;
@@ -201,7 +230,6 @@ export default function IframeStudentPlayer({ params }) {
 
     questions.forEach((q, i) => {
       const studentAns = answers[i];
-      
       const isAttempted = q.type === 'MSQ' ? (Array.isArray(studentAns) && studentAns.length > 0) : (studentAns !== undefined && studentAns !== "");
 
       if (isAttempted) {
@@ -226,11 +254,10 @@ export default function IframeStudentPlayer({ params }) {
     const finalScoreFixed = score.toFixed(2);
 
     try {
-      // 1. Save to Database
       await addDoc(collection(db, "mocks", mockId, "submissions"), {
-        studentName: studentInfo.name,
-        studentEmail: studentInfo.email,
-        studentPhone: studentInfo.phone,
+        studentName: studentInfo.name.trim(),
+        studentEmail: studentInfo.email.trim(),
+        studentPhone: studentInfo.phone.trim(),
         orgId: examData.orgId, 
         score: finalScoreFixed,
         totalMarks: totalMarks,
@@ -241,13 +268,12 @@ export default function IframeStudentPlayer({ params }) {
         answers
       });
 
-      // 2. ⚡ TRIGGER AUTOMATED SCORECARD EMAIL ⚡
       await fetch('/api/send-score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studentEmail: studentInfo.email,
-          studentName: studentInfo.name,
+          studentEmail: studentInfo.email.trim(),
+          studentName: studentInfo.name.trim(),
           score: finalScoreFixed,
           totalMarks: totalMarks,
           orgName: examData.orgName,
@@ -280,7 +306,7 @@ export default function IframeStudentPlayer({ params }) {
     const isVisited = visited[i];
 
     if (!isVisited) notVisitedCount++;
-    else if (isMarked) markedCount++; // Marked overrides purely answered/not answered in the legend visually
+    else if (isMarked) markedCount++; 
     else if (isAnswered) answeredCount++;
     else notAnsweredCount++;
   });
@@ -293,10 +319,10 @@ export default function IframeStudentPlayer({ params }) {
   if (!hasStarted) {
     return (
       <div className="min-h-screen bg-slate-100 font-sans flex items-center justify-center p-4">
-        <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full overflow-hidden border border-slate-200">
+        <div className="bg-white rounded-[2rem] shadow-2xl max-w-xl w-full overflow-hidden border border-slate-200">
           <div className="bg-slate-900 p-8 text-center relative border-b-4 border-indigo-500">
             {examData.orgLogo ? (
-               <img src={examData.orgLogo} alt="Logo" className="w-16 h-16 object-contain mx-auto mb-4 bg-white p-1 rounded-xl shadow-md" />
+               <img src={examData.orgLogo} alt="Logo" className="w-16 h-16 object-contain mx-auto mb-4 bg-white p-2 rounded-xl shadow-md" />
             ) : (
                <div className="w-16 h-16 bg-indigo-500 text-white rounded-xl flex items-center justify-center text-3xl mx-auto mb-4 shadow-md"><i className="fas fa-building"></i></div>
             )}
@@ -317,18 +343,26 @@ export default function IframeStudentPlayer({ params }) {
             <form onSubmit={startSecureExam} className="space-y-4">
               <div>
                 <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Full Name</label>
-                <input required type="text" value={studentInfo.name} onChange={e => setStudentInfo({...studentInfo, name: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500" placeholder="John Doe" />
+                <input required type="text" value={studentInfo.name} onChange={e => setStudentInfo({...studentInfo, name: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors" placeholder="e.g. Rahul Sharma" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Email</label>
-                  <input required type="email" value={studentInfo.email} onChange={e => setStudentInfo({...studentInfo, email: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500" placeholder="john@email.com" />
+                  <input required type="email" value={studentInfo.email} onChange={e => setStudentInfo({...studentInfo, email: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors" placeholder="rahul@example.com" />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Phone</label>
-                  <input required type="tel" value={studentInfo.phone} onChange={e => setStudentInfo({...studentInfo, phone: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500" placeholder="9876543210" />
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Mobile Number</label>
+                  <input required type="tel" value={studentInfo.phone} onChange={e => setStudentInfo({...studentInfo, phone: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors" placeholder="9876543210" />
                 </div>
               </div>
+
+              {/* ⚡ INLINE FORM ERROR DISPLAY ⚡ */}
+              {formError && (
+                <div className="bg-rose-50 border border-rose-200 text-rose-600 px-4 py-3 rounded-xl text-xs font-black flex items-center gap-2 animate-in fade-in slide-in-from-top-2 mt-4">
+                  <i className="fas fa-exclamation-circle text-base"></i> {formError}
+                </div>
+              )}
+
               <button type="submit" className="w-full mt-6 bg-indigo-600 text-white py-4 rounded-xl font-black text-lg shadow-lg hover:bg-indigo-700 transition hover:-translate-y-0.5 flex items-center justify-center gap-2">
                 <i className="fas fa-lock"></i> Start Secure Exam
               </button>
@@ -341,12 +375,52 @@ export default function IframeStudentPlayer({ params }) {
 
   if (isFinished) {
     return (
-      <div className="h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
-        <div className="bg-white rounded-3xl shadow-xl max-w-md w-full p-10 text-center border border-slate-200">
-          <div className="w-24 h-24 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center text-4xl mx-auto mb-6"><i className="fas fa-check-circle"></i></div>
-          <h2 className="text-2xl font-black text-slate-800 mb-2">Exam Submitted Successfully!</h2>
-          <p className="text-slate-500 font-medium mb-6">Your responses have been securely recorded by {examData.orgName}.</p>
-          <div className="bg-slate-100 text-slate-400 p-4 rounded-xl text-xs font-bold">You may now exit full screen and close this tab.</div>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans relative overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-emerald-400/20 rounded-full blur-[100px] animate-pulse pointer-events-none"></div>
+        
+        <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-emerald-900/5 max-w-lg w-full overflow-hidden border border-slate-100 relative z-10 animate-in fade-in zoom-in-95 duration-500">
+          <div className="bg-slate-900 p-10 text-center relative overflow-hidden">
+            <div className="absolute -right-10 -top-10 w-40 h-40 bg-emerald-500/20 rounded-full blur-2xl"></div>
+            <div className="w-20 h-20 bg-emerald-500/20 border-2 border-emerald-400 text-emerald-400 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-[0_0_30px_rgba(52,211,153,0.3)] animate-bounce" style={{ animationDuration: '2s' }}>
+              <i className="fas fa-check"></i>
+            </div>
+            <h2 className="text-3xl font-black text-white mb-2 tracking-tight">Assessment Complete</h2>
+            <p className="text-emerald-300 font-medium text-sm">Secure session terminated.</p>
+          </div>
+          
+          <div className="p-8 md:p-10 text-center">
+            <p className="text-slate-600 font-medium text-lg mb-8 leading-relaxed">
+              Thank you, <strong>{studentInfo.name || "Student"}</strong>. Your responses have been encrypted and submitted securely.
+            </p>
+            
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 mb-8 shadow-inner">
+              <div className="flex items-center justify-center gap-4 mb-4">
+                 <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xl shadow-sm shrink-0">
+                   <i className="fas fa-envelope-open-text"></i>
+                 </div>
+                 <div className="text-left">
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Next Steps</p>
+                   <p className="text-sm font-bold text-slate-800">Scorecard sent to your email</p>
+                 </div>
+              </div>
+              <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                An automated diagnostic report has been dispatched to <strong className="text-slate-700">{studentInfo.email}</strong> by the {examData.orgName} team.
+              </p>
+            </div>
+
+            <button onClick={() => window.close()} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-4 rounded-xl font-black transition-colors border border-slate-200 shadow-sm flex items-center justify-center gap-2">
+              <i className="fas fa-times-circle"></i> Close Tab
+            </button>
+          </div>
+
+          <div className="bg-slate-50 border-t border-slate-100 p-5 text-center flex items-center justify-center gap-3">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Powered securely by</span>
+            {examData.orgLogo ? (
+               <img src={examData.orgLogo} alt="Logo" className="h-5 object-contain grayscale opacity-60" />
+            ) : (
+              <span className="text-xs font-black text-slate-600">{examData.orgName}</span>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -355,8 +429,77 @@ export default function IframeStudentPlayer({ params }) {
   const currentQ = questions[currentQIndex];
 
   return (
-    <div ref={playerRef} className="h-screen flex flex-col bg-white font-sans select-none overflow-hidden">
+    <div ref={playerRef} className="h-screen flex flex-col bg-white font-sans select-none overflow-hidden relative">
       
+      {/* ⚡ PROFESSIONAL SECURITY WARNING MODAL ⚡ */}
+      {warningAlert.show && (
+        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[999999] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border-[3px] border-rose-500 animate-in zoom-in-95 fade-in duration-300">
+            <div className="bg-rose-500 p-6 text-center text-white relative overflow-hidden">
+              <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/diagonal-stripes.png')] opacity-20"></div>
+              <i className="fas fa-exclamation-triangle text-5xl mb-3 relative z-10 animate-pulse"></i>
+              <h2 className="text-2xl font-black relative z-10 tracking-tight">Security Violation</h2>
+            </div>
+            <div className="p-8 text-center bg-white">
+              <p className="text-slate-800 font-bold text-lg mb-2 leading-tight">{warningAlert.reason}</p>
+              <div className="inline-block bg-rose-100 text-rose-700 px-4 py-1.5 rounded-full font-black text-xs uppercase tracking-widest mb-6 border border-rose-200">
+                Warning {warningAlert.count} of {MAX_WARNINGS}
+              </div>
+              
+              {warningAlert.isFinal ? (
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl">
+                  <p className="text-slate-600 font-bold text-sm flex items-center justify-center gap-2">
+                    <i className="fas fa-spinner fa-spin text-rose-500"></i> Auto-submitting exam...
+                  </p>
+                </div>
+              ) : (
+                <button onClick={() => setWarningAlert({ show: false, reason: "", count: 0, isFinal: false })} className="w-full bg-rose-600 text-white font-black py-4 rounded-xl hover:bg-rose-700 transition-colors shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2">
+                  <i className="fas fa-shield-alt"></i> I Understand, Return
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ⚡ PROFESSIONAL SMART SUBMIT CONFIRMATION MODAL ⚡ */}
+      {showSubmitConfirm && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[999999] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2rem] shadow-2xl max-w-md w-full overflow-hidden border border-slate-200 animate-in zoom-in-95 fade-in duration-300">
+            <div className="p-8 md:p-10 text-center">
+              <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-inner border border-indigo-100">
+                <i className="fas fa-paper-plane"></i>
+              </div>
+              <h2 className="text-2xl font-black text-slate-900 mb-2">Submit Assessment?</h2>
+              
+              <div className="bg-slate-50 rounded-xl p-4 mb-6 border border-slate-200 text-left space-y-2">
+                <div className="flex justify-between items-center text-sm font-bold">
+                  <span className="text-slate-500">Total Questions:</span>
+                  <span className="text-slate-900">{totalQs}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm font-bold">
+                  <span className="text-emerald-600">Answered:</span>
+                  <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">{answeredCount}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm font-bold">
+                  <span className="text-rose-500">Left Blank:</span>
+                  <span className="text-rose-700 bg-rose-100 px-2 py-0.5 rounded">{totalQs - answeredCount}</span>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-500 font-bold mb-8 uppercase tracking-widest">You cannot change your answers after submitting.</p>
+              
+              <div className="flex gap-4">
+                <button onClick={() => setShowSubmitConfirm(false)} className="flex-1 bg-slate-100 text-slate-700 font-black py-4 rounded-xl hover:bg-slate-200 transition">Cancel</button>
+                <button onClick={() => submitExam()} className="flex-1 bg-emerald-500 text-white font-black py-4 rounded-xl shadow-lg shadow-emerald-500/30 hover:bg-emerald-600 transition flex items-center justify-center gap-2">
+                  <i className="fas fa-check"></i> Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* SECURE HEADER */}
       <header className="bg-slate-900 border-b border-slate-800 h-14 md:h-16 px-4 md:px-6 flex justify-between items-center shrink-0 z-10 text-white">
         <div className="flex items-center gap-3">
@@ -365,11 +508,6 @@ export default function IframeStudentPlayer({ params }) {
         </div>
         
         <div className="flex items-center gap-4 md:gap-8">
-          {warnings > 0 && (
-            <div className="bg-rose-500/20 text-rose-300 px-3 py-1 rounded border border-rose-500/50 text-[10px] font-black animate-pulse">
-              <i className="fas fa-exclamation-triangle"></i> WARNING: {warnings}/{MAX_WARNINGS}
-            </div>
-          )}
           <div className={`font-mono text-lg md:text-2xl font-black flex items-center gap-2 tracking-wider ${timeLeft < 300 ? 'text-rose-400 animate-pulse' : 'text-emerald-400'}`}>
             <i className="far fa-clock"></i> {formatTime(timeLeft)}
           </div>
@@ -378,7 +516,6 @@ export default function IframeStudentPlayer({ params }) {
 
       {/* SUB-HEADER (SECTIONS) */}
       <div className="bg-slate-50 border-b border-slate-200 h-10 px-4 flex items-center gap-2 overflow-x-auto hide-scrollbar">
-         {/* Mapping sections if they exist, otherwise default to General */}
          {Array.from(new Set(questions.map(q => q.section || "General"))).map((sec, idx) => (
            <button key={idx} className="bg-indigo-600 text-white px-4 py-1 rounded text-xs font-black shadow-sm shrink-0 uppercase tracking-widest">{sec}</button>
          ))}
@@ -480,7 +617,6 @@ export default function IframeStudentPlayer({ params }) {
         {/* RIGHT: QUESTION PALETTE & STATUS */}
         <aside className="w-72 bg-slate-50 border-l border-slate-200 hidden lg:flex flex-col shrink-0">
           
-          {/* Status Tracker */}
           <div className="p-4 grid grid-cols-2 gap-2 text-[10px] font-black uppercase tracking-wide border-b border-slate-200">
              <div className="bg-emerald-100 border border-emerald-300 text-emerald-800 p-2 rounded-lg flex justify-between items-center">
                <span>Answered</span> <span className="text-sm">{answeredCount}</span>
@@ -496,7 +632,6 @@ export default function IframeStudentPlayer({ params }) {
              </div>
           </div>
 
-          {/* Palette Grid */}
           <div className="flex-1 overflow-y-auto p-4">
             <h3 className="text-xs font-black text-slate-800 mb-3 uppercase tracking-widest">Questions</h3>
             <div className="grid grid-cols-5 gap-2">
@@ -506,12 +641,11 @@ export default function IframeStudentPlayer({ params }) {
                 const isVis = visited[i];
                 const isCurrent = currentQIndex === i;
                 
-                // Color Logic mapped exactly to professional standards
-                let btnStyle = "bg-white border-slate-300 text-slate-500"; // Not Visited
-                if (isVis && !isAnswered) btnStyle = "bg-rose-100 border-rose-400 text-rose-800"; // Visited, Not Answered
-                if (isAnswered) btnStyle = "bg-emerald-500 border-emerald-600 text-white"; // Answered
-                if (isMarked) btnStyle = "bg-purple-500 border-purple-600 text-white"; // Marked for review (overrides answered color in palette)
-                if (isMarked && isAnswered) btnStyle = "bg-purple-500 border-purple-600 text-white ring-2 ring-emerald-400 ring-offset-1"; // Marked AND Answered
+                let btnStyle = "bg-white border-slate-300 text-slate-500"; 
+                if (isVis && !isAnswered) btnStyle = "bg-rose-100 border-rose-400 text-rose-800"; 
+                if (isAnswered) btnStyle = "bg-emerald-500 border-emerald-600 text-white"; 
+                if (isMarked) btnStyle = "bg-purple-500 border-purple-600 text-white"; 
+                if (isMarked && isAnswered) btnStyle = "bg-purple-500 border-purple-600 text-white ring-2 ring-emerald-400 ring-offset-1"; 
 
                 return (
                   <button 
@@ -529,8 +663,8 @@ export default function IframeStudentPlayer({ params }) {
           </div>
 
           <div className="p-4 border-t border-slate-200">
-            <button onClick={() => { if(window.confirm("Are you sure you want to final submit? You cannot undo this.")) submitExam(); }} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-3.5 rounded-xl text-sm font-black shadow-lg transition uppercase tracking-widest">
-              Submit Exam
+            <button onClick={() => setShowSubmitConfirm(true)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-3.5 rounded-xl text-sm font-black shadow-lg transition uppercase tracking-widest flex items-center justify-center gap-2">
+              <i className="fas fa-paper-plane"></i> Final Submit
             </button>
           </div>
         </aside>

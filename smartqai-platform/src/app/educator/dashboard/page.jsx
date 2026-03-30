@@ -47,7 +47,7 @@ export default function EducatorDashboard() {
         </div>
         <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
             <button onClick={() => router.push('/educator/dashboard')} className="w-full flex items-center gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-emerald-400 shadow-inner">
-                <i className="fas fa-home w-4 text-emerald-400"></i> Dashboard
+                <i className="fas fa-home w-4 text-emerald-400"></i>Educator Dashboard
             </button>
             <button onClick={() => router.push('/educator/create-mock')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
                 <i className="fas fa-file-pdf w-4"></i> Exam Studio

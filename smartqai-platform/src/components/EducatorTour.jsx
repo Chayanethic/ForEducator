@@ -41,7 +41,7 @@ export default function EducatorTour({ userId }) {
     {
       target: '#tour-pdf-extract',
       content: 'Upload a past paper PDF here. Gemini AI will automatically read it and extract the questions, options, and diagrams for you!',
-      placement: 'right',
+      placement: 'bottom',
     },
     {
       target: '#tour-page-range',
@@ -56,7 +56,7 @@ export default function EducatorTour({ userId }) {
     {
       target: '#tour-manual-build',
       content: 'Prefer to write your own questions? Click here to build a custom exam from scratch.',
-      placement: 'left',
+      placement: 'bottom',
     },
     {
       target: '#tour-exam-settings',
@@ -67,16 +67,6 @@ export default function EducatorTour({ userId }) {
       target: '#tour-publish',
       content: 'Once your questions are ready, hit Publish! We will secure the exam and generate a Live Room ID for your students.',
       placement: 'bottom',
-    },
-    {
-      target: '#tour-recent-rooms',
-      content: 'See your last published Live Rooms here. Click on any room to jump straight into the live student leaderboard!',
-      placement: 'left',
-    },
-    {
-      target: '#tour-quick-poll',
-      content: 'Need to test the class instantly? Launch a Live Quiz Poll to send a single question to their screens in real-time.',
-      placement: 'left',
     }
   ];
 

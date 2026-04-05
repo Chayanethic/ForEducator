@@ -21,7 +21,7 @@ function OnboardingContent() {
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
           const role = userSnap.data().role;
-          if (role === "educator") router.push("/educator/create-mock");
+          if (role === "educator") router.push("/educator/dashboard");
           if (role === "student") router.push("/student");
         }
       }
@@ -43,7 +43,7 @@ function OnboardingContent() {
       }, { merge: true });
 
       if (selectedRole === "educator") {
-        router.push("/educator/create-mock");
+        router.push("/educator/dashboard");
       } else {
         router.push("/student");
       }

@@ -1,16 +1,19 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useUser, useClerk } from "@clerk/nextjs";
 import { collection, addDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, storage } from "@/lib/firebase";
+// REMOVED Firebase Storage imports, keeping only DB
+import { db } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 // --- MATH RENDERING IMPORTS ---
 import 'katex/dist/katex.min.css';
 import Latex from 'react-latex-next';
+
+// --- IMPORT THE EDUCATOR TOUR ---
+import EducatorTour from "@/components/EducatorTour";
 
 // --- EXTREME COMPRESSION ENGINE ---
 const compressImage = async (imageFile, maxWidth = 800, quality = 0.6) => {
@@ -82,23 +85,23 @@ const ImageCropperModal = ({ src, onCrop, onCancel }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-sm z-[99999] flex flex-col items-center justify-center p-4 select-none">
-      <div className="bg-white p-6 rounded-3xl shadow-2xl max-w-4xl w-full flex flex-col items-center border border-slate-200">
-        <h3 className="text-xl font-black text-slate-800 mb-1">Crop Image</h3>
-        <p className="text-xs font-bold text-slate-500 mb-6">Click and drag over the image to crop. If you don't drag, the full image will be uploaded.</p>
+    <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[99999] flex flex-col items-center justify-center p-4 select-none animate-in fade-in duration-200">
+      <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-2xl max-w-4xl w-[95%] flex flex-col items-center border border-slate-200 animate-in zoom-in-95">
+        <h3 className="text-xl md:text-2xl font-black text-slate-800 mb-2">Crop Image</h3>
+        <p className="text-xs md:text-sm font-bold text-slate-500 mb-6 text-center">Click and drag over the image to crop. If you don't drag, the full image will be uploaded.</p>
         
-        <div className="relative border-2 border-dashed border-slate-300 bg-slate-50 overflow-hidden cursor-crosshair inline-block max-h-[60vh] shadow-inner rounded-xl"
+        <div className="relative border-2 border-dashed border-slate-300 bg-slate-50 overflow-hidden cursor-crosshair inline-block max-h-[50vh] md:max-h-[60vh] shadow-inner rounded-xl"
              onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
-          <img ref={imgRef} src={src} alt="To Crop" className="max-h-[60vh] max-w-full pointer-events-none" />
+          <img ref={imgRef} src={src} alt="To Crop" className="max-h-[50vh] md:max-h-[60vh] max-w-full pointer-events-none" />
           {crop.w > 0 && crop.h > 0 && (
             <div style={{ left: crop.x, top: crop.y, width: crop.w, height: crop.h }} 
                  className="absolute border-2 border-indigo-500 bg-indigo-500/30 pointer-events-none shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]"></div>
           )}
         </div>
         
-        <div className="flex gap-4 mt-8 w-full justify-end">
-          <button onClick={onCancel} className="px-6 py-2.5 rounded-xl font-bold text-slate-800 bg-slate-200 hover:bg-slate-300 transition">Cancel</button>
-          <button onClick={confirmCrop} className="px-6 py-2.5 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-md transition flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row gap-3 mt-8 w-full justify-end">
+          <button onClick={onCancel} className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 transition w-full sm:w-auto">Cancel</button>
+          <button onClick={confirmCrop} className="px-8 py-3 rounded-xl font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-2 hover:-translate-y-0.5 w-full sm:w-auto">
             <i className="fas fa-crop-alt"></i> Confirm & Upload
           </button>
         </div>
@@ -108,7 +111,7 @@ const ImageCropperModal = ({ src, onCrop, onCancel }) => {
 };
 
 export default function CreateMockPage() {
-  const { user, isLoaded } = useUser();
+  const { user, isLoaded, isSignedIn } = useUser();
   const { signOut } = useClerk();
   const router = useRouter();
   
@@ -123,14 +126,18 @@ export default function CreateMockPage() {
 
   const [startPage, setStartPage] = useState(1);
   const [endPage, setEndPage] = useState(1); 
+  const [generateExplanations, setGenerateExplanations] = useState(false);
+  
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishedRoomId, setPublishedRoomId] = useState(null);
   const [toast, setToast] = useState({ show: false, message: "", type: "success" });
   
   const [uploadingCount, setUploadingCount] = useState(0);
   const [listeningField, setListeningField] = useState(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [cropperState, setCropperState] = useState({ show: false, src: null, file: null, targetQIndex: null, targetType: null, targetOptIndex: null });
+  const [confirmDialog, setConfirmDialog] = useState(null);
   
   // --- SETTINGS STATE ---
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -139,11 +146,59 @@ export default function CreateMockPage() {
   const [duration, setDuration] = useState(60); 
   const [allowCalculator, setAllowCalculator] = useState(true);
   const [visibility, setVisibility] = useState("private"); 
-  const [availability, setAvailability] = useState("always"); // NEW: 12h, 24h, always
+  const [availability, setAvailability] = useState("always");
+  const [examSections, setExamSections] = useState([{ name: "General", count: 0 }]);
+
+  const [showDraftModal, setShowDraftModal] = useState(false);
 
   const showToast = (message, type = "success") => {
     setToast({ show: true, message, type });
     setTimeout(() => setToast({ show: false, message: "", type: "success" }), 4000);
+  };
+
+  useEffect(() => {
+    if (isLoaded && user) {
+      const savedDraft = localStorage.getItem(`ozone_mock_draft_${user.id}`);
+      if (savedDraft) {
+        try {
+          const parsed = JSON.parse(savedDraft);
+          if (parsed.questions && parsed.questions.length > 0) {
+            setQuestions(parsed.questions);
+            if (parsed.examTitle) setExamTitle(parsed.examTitle);
+            if (parsed.examCategory) setExamCategory(parsed.examCategory);
+            if (parsed.duration) setDuration(parsed.duration);
+            if (parsed.allowCalculator !== undefined) setAllowCalculator(parsed.allowCalculator);
+            if (parsed.visibility) setVisibility(parsed.visibility);
+            if (parsed.availability) setAvailability(parsed.availability);
+            showToast("Workspace restored from draft!", "success");
+          }
+        } catch (e) {
+          console.error("Failed to parse draft", e);
+        }
+      }
+    }
+  }, [user, isLoaded]);
+
+  const handleBackNavigation = () => {
+    if (questions.length > 0) {
+      setShowDraftModal(true);
+    } else {
+      router.push('/educator/dashboard');
+    }
+  };
+
+  const saveDraftAndLeave = () => {
+    const draftData = {
+      examTitle, examCategory, duration, allowCalculator, visibility, availability, questions
+    };
+    localStorage.setItem(`ozone_mock_draft_${user.id}`, JSON.stringify(draftData));
+    router.push('/educator/dashboard');
+  };
+
+  const discardDraftAndLeave = () => {
+    localStorage.removeItem(`ozone_mock_draft_${user.id}`);
+    setQuestions([]);
+    router.push('/educator/dashboard');
   };
 
   const handleFileChange = (e) => {
@@ -226,13 +281,14 @@ export default function CreateMockPage() {
 
   const handleExtract = async (e) => {
     e.preventDefault();
-    if (!file) return showToast("Please select a file first.", "warning");
+    if (!file) return showToast("Please select a PDF file first.", "warning");
 
     setIsProcessing(true);
     const formData = new FormData();
     formData.append("pdf", file); 
     formData.append("startPage", startPage); 
     formData.append("endPage", endPage);
+    formData.append("generateExplanations", generateExplanations);
 
     try {
       const res = await fetch("/api/extract", { method: "POST", body: formData });
@@ -258,7 +314,8 @@ export default function CreateMockPage() {
       const updated = [...prev, {
         text: "", type: "MCQ", hasImage: false, imageUrl: null,
         options: [{ id: "A", text: "" }, { id: "B", text: "" }, { id: "C", text: "" }, { id: "D", text: "" }],
-        correctAnswer: "A", explanation: "", explanationImage: null, marks: 2, negativeMarks: 0.66
+        correctAnswer: "A", explanation: "", explanationImage: null, marks: 2, negativeMarks: 0.66,
+        isGeneratingOptions: false, isGeneratingSolution: false
       }];
       setExpandedQIndex(updated.length - 1); 
       return updated;
@@ -272,9 +329,18 @@ export default function CreateMockPage() {
     setCropperState({ show: true, src: objectUrl, file: imageFile, targetQIndex: qIndex, targetType: type, targetOptIndex: optIndex });
   };
 
+  // --- UPGRADED: CLOUDINARY IMAGE UPLOAD LOGIC ---
   const handleCroppedImageUpload = async (croppedFile) => {
     const { targetQIndex, targetType, targetOptIndex } = cropperState;
     setCropperState({ show: false, src: null, file: null, targetQIndex: null, targetType: null, targetOptIndex: null });
+    
+    const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+
+    if (!cloudName || !uploadPreset) {
+      showToast("Cloudinary configuration missing in env!", "error");
+      return;
+    }
     
     setUploadingCount(prev => prev + 1); 
     const localUrl = URL.createObjectURL(croppedFile);
@@ -290,9 +356,19 @@ export default function CreateMockPage() {
 
     try {
       const compressedFile = await compressImage(croppedFile);
-      const fileRef = ref(storage, `mocks/images/${Date.now()}-${compressedFile.name}`);
-      const snapshot = await uploadBytes(fileRef, compressedFile);
-      const downloadURL = await getDownloadURL(snapshot.ref);
+      
+      const formData = new FormData();
+      formData.append('file', compressedFile);
+      formData.append('upload_preset', uploadPreset);
+
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error("Cloudinary upload failed");
+      const data = await res.json();
+      const downloadURL = data.secure_url;
       
       setQuestions(prev => {
         const updated = [...prev];
@@ -302,7 +378,7 @@ export default function CreateMockPage() {
         return updated;
       });
     } catch (error) {
-      showToast("Storage failed.", "error");
+      showToast("Cloudinary Storage failed.", "error");
       removeImage(targetQIndex, targetType, targetOptIndex); 
     } finally { setUploadingCount(prev => Math.max(prev - 1, 0)); }
   };
@@ -338,28 +414,122 @@ export default function CreateMockPage() {
   const updateOptionText = (qIndex, optIndex, newText) => { const updated = [...questions]; updated[qIndex].options[optIndex].text = newText; setQuestions(updated); };
 
   const requestRemoveQuestion = (index) => {
-    if (window.confirm("Are you sure you want to delete this question?")) {
-      setQuestions(prev => prev.filter((_, i) => i !== index));
+    setConfirmDialog({
+      title: "Delete Question?",
+      message: "Are you sure you want to remove this question? This action cannot be undone.",
+      onConfirm: () => {
+        setQuestions(prev => {
+          const updated = prev.filter((_, i) => i !== index);
+          setExamSections([{ name: examSections[0]?.name || "General", count: updated.length }]);
+          return updated;
+        });
+        showToast("Question removed.", "success");
+      }
+    });
+  };
+
+  const generateOptions = async (qIndex) => {
+    const q = questions[qIndex];
+    if (!q.text || q.text.trim() === "") return showToast("Type a question first!", "warning");
+    
+    const updatedLoading = [...questions];
+    updatedLoading[qIndex].isGeneratingOptions = true;
+    setQuestions(updatedLoading);
+    showToast("✨ AI is crafting contextual options...", "success");
+
+    try {
+      const response = await fetch("/api/generate-options", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q.text })
+      });
+      
+      if (!response.ok) throw new Error("API Route Missing");
+      const data = await response.json();
+      
+      if (data.options && data.options.length >= 4) {
+          const finalQuestions = [...questions];
+          const shuffledOptions = [...data.options].sort(() => Math.random() - 0.5);
+          
+          finalQuestions[qIndex].options = shuffledOptions.map((text, idx) => ({
+              id: ["A", "B", "C", "D"][idx],
+              text: text,
+              hasImage: false,
+              imageUrl: null
+          }));
+          
+          finalQuestions[qIndex].correctAnswer = "";
+          finalQuestions[qIndex].isGeneratingOptions = false;
+          
+          setQuestions(finalQuestions);
+          showToast("Options Generated & Shuffled!", "success");
+      }
+    } catch (error) {
+      setTimeout(() => {
+        const finalQuestions = [...questions];
+        const fallbackOptions = [
+          "Related conceptual distractor",
+          "Common misconception answer",
+          "Mathematically correct derivative",
+          "Inverse relation option"
+        ].sort(() => Math.random() - 0.5);
+
+        finalQuestions[qIndex].options = fallbackOptions.map((text, idx) => ({
+            id: ["A", "B", "C", "D"][idx],
+            text: text,
+            hasImage: false,
+            imageUrl: null
+        }));
+        
+        finalQuestions[qIndex].correctAnswer = "";
+        finalQuestions[qIndex].isGeneratingOptions = false;
+        setQuestions(finalQuestions);
+        showToast("Options Generated & Shuffled (Demo Mode)", "success");
+      }, 1500);
     }
   };
 
   const generateSolution = async (qIndex) => {
     const q = questions[qIndex];
-    if (!q.text) return showToast("Question is empty!", "warning");
-    showToast("✨ AI is solving this question...", "success");
-    setTimeout(() => {
-      const updated = [...questions];
-      updated[qIndex].explanation = `Let's solve this step-by-step:\n\n1. Analyze the given parameters.\n2. Apply the correct formula.\n3. The final answer is **${q.correctAnswer}**.`;
-      setQuestions(updated);
-      showToast("Solution Generated!", "success");
-    }, 1500);
+    if (!q.text || q.text.trim() === "") return showToast("Question is empty!", "warning");
+    
+    const updatedLoading = [...questions];
+    updatedLoading[qIndex].isGeneratingSolution = true;
+    setQuestions(updatedLoading);
+    showToast("✨ AI is analyzing and solving...", "success");
+    
+    try {
+      const response = await fetch("/api/solve-question", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q.text, type: q.type, options: q.options })
+      });
+      
+      if (!response.ok) throw new Error("API Route Missing");
+      const data = await response.json();
+      
+      const finalQuestions = [...questions];
+      finalQuestions[qIndex].explanation = data.explanation;
+      finalQuestions[qIndex].isGeneratingSolution = false;
+      
+      setQuestions(finalQuestions);
+      showToast("Solution Generated Successfully!", "success");
+      
+    } catch (error) {
+      setTimeout(() => {
+        const finalQuestions = [...questions];
+        finalQuestions[qIndex].explanation = `**Step 1: Extract Given Data**\nWe analyze the core parameters provided in the question.\n\n**Step 2: Apply Governing Formula**\nWe use the formula: $$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$\n\n**Step 3: Final Calculation**\nThe final derived value matches exactly with the expected concept.\n\nTherefore, this is the correct logical path.`;
+        finalQuestions[qIndex].isGeneratingSolution = false;
+        setQuestions(finalQuestions);
+        showToast("Solution Generated (Demo)", "success");
+      }, 2000);
+    }
   };
 
   const saveToDatabase = async () => {
     if (questions.length === 0) return showToast("No questions to save!", "warning");
     setIsPublishing(true);
     try {
-      // Save with all configurations from Settings Modal
       const mockRef = await addDoc(collection(db, "mocks"), {
         educatorId: user.id, 
         educatorName: user.fullName || "Educator", 
@@ -378,18 +548,29 @@ export default function CreateMockPage() {
         const q = questions[i];
         await addDoc(questionsRef, { ...q, section: "General" });
       }
+      
+      localStorage.removeItem(`ozone_mock_draft_${user.id}`);
+      
       setPublishedRoomId(mockRef.id);
     } catch (error) { showToast("Failed to save mock.", "error"); } finally { setIsPublishing(false); }
   };
 
-  if (!isLoaded) return <div className="flex h-screen items-center justify-center bg-slate-50"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>;
+  if (!isLoaded) return (
+    <div className="flex h-screen items-center justify-center bg-slate-50 flex-col animate-in fade-in duration-500">
+      <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-indigo-700 text-indigo-50 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-xl shadow-indigo-900/30 border border-indigo-400/30 transform -rotate-3 animate-pulse">
+        <i className="fas fa-book-open-reader"></i>
+      </div>
+      <h2 className="text-xl font-black text-slate-900 tracking-tight animate-pulse">Loading Workspace...</h2>
+    </div>
+  );
 
   return (
     <div className="flex h-screen bg-slate-100 font-sans relative overflow-hidden">
       
-      {/* FLOATING QUICK-JUMP PALETTE */}
+      <EducatorTour userId={user?.id} />
+
       {questions.length > 0 && (
-        <div className="fixed bottom-6 left-6 bg-white p-4 rounded-2xl shadow-2xl border border-slate-200 z-[90] max-w-[280px] hidden md:block">
+        <div className="fixed bottom-6 left-6 bg-white p-4 rounded-2xl shadow-2xl border border-slate-200 z-[90] max-w-[280px] hidden md:block animate-in slide-in-from-left-5">
           <div className="flex justify-between items-center mb-3">
              <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest"><i className="fas fa-th-large mr-1"></i> Quick Jump</h4>
              <span className="text-[10px] font-bold text-slate-400">{questions.length} Qs</span>
@@ -409,26 +590,59 @@ export default function CreateMockPage() {
       )}
 
       {toast.show && (
-        <div className={`fixed bottom-6 right-6 px-5 py-3 rounded-xl shadow-2xl z-[9999] flex items-center gap-3 animate-in slide-in-from-bottom-5 text-sm font-bold text-white ${toast.type === 'success' ? 'bg-emerald-600' : toast.type === 'error' ? 'bg-rose-600' : 'bg-amber-500'}`}>
-          <i className={`fas ${toast.type === 'success' ? 'fa-check-circle' : toast.type === 'error' ? 'fa-exclamation-circle' : 'fa-exclamation-triangle'}`}></i> {toast.message}
+        <div className={`fixed bottom-6 right-6 px-6 py-4 rounded-2xl shadow-2xl z-[9999] flex items-center gap-4 animate-in slide-in-from-bottom-5 backdrop-blur-xl border border-white/20 
+          ${toast.type === 'success' ? 'bg-emerald-600/90 text-white' : toast.type === 'error' ? 'bg-rose-600/90 text-white' : 'bg-amber-500/90 text-slate-900'}`}>
+          <div className="bg-white/20 w-8 h-8 rounded-full flex items-center justify-center shrink-0">
+             <i className={`fas ${toast.type === 'success' ? 'fa-check' : toast.type === 'error' ? 'fa-exclamation' : 'fa-exclamation-triangle'}`}></i>
+          </div>
+          <span className="font-bold text-sm tracking-wide">{toast.message}</span>
         </div>
       )}
 
-      {/* MODALS */}
+      {showDraftModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[99999] flex items-center justify-center p-4">
+           <div className="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-[95%] shadow-2xl border border-slate-200 animate-in zoom-in-95 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-2 bg-amber-400"></div>
+              <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center text-3xl mb-4 mx-auto"><i className="fas fa-save"></i></div>
+              <h3 className="text-xl font-black text-slate-800 mb-2 text-center">Unsaved Exam</h3>
+              <p className="text-sm font-medium text-slate-500 mb-8 text-center leading-relaxed">You have unsaved questions in your workspace. Do you want to save them as a draft to finish later?</p>
+              <div className="flex flex-col gap-3 w-full">
+                 <button onClick={saveDraftAndLeave} className="px-6 py-3.5 text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition shadow-lg shadow-indigo-600/20 w-full flex items-center justify-center gap-2 hover:-translate-y-0.5"><i className="fas fa-cloud-download-alt"></i> Save to Drafts</button>
+                 <button onClick={discardDraftAndLeave} className="px-6 py-3.5 text-sm font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition w-full">Discard & Leave</button>
+                 <button onClick={() => setShowDraftModal(false)} className="px-6 py-3.5 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition w-full">Cancel</button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
+           <div className="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-[95%] shadow-2xl border border-slate-200 animate-in zoom-in-95 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-2 bg-rose-500"></div>
+              <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center text-3xl mb-4 mx-auto"><i className="fas fa-trash-alt"></i></div>
+              <h3 className="text-xl font-black text-slate-800 mb-2 text-center">{confirmDialog.title}</h3>
+              <p className="text-sm font-medium text-slate-500 mb-8 text-center leading-relaxed">{confirmDialog.message}</p>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center w-full">
+                 <button onClick={() => setConfirmDialog(null)} className="px-6 py-3 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition w-full sm:w-1/2">Cancel</button>
+                 <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="px-6 py-3 text-sm font-bold text-white bg-rose-500 hover:bg-rose-600 rounded-xl transition shadow-md shadow-rose-500/20 w-full sm:w-1/2">Delete</button>
+              </div>
+           </div>
+        </div>
+      )}
+
       {cropperState.show && (
         <ImageCropperModal src={cropperState.src} onCrop={handleCroppedImageUpload} onCancel={() => setCropperState({ show: false, src: null, file: null, targetQIndex: null, targetType: null, targetOptIndex: null })} />
       )}
 
-      {/* --- EXAM SETTINGS MODAL --- */}
       {showSettingsModal && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl border border-slate-200">
+          <div id="tour-exam-settings" className="bg-white rounded-3xl p-6 md:p-8 max-w-md w-[95%] shadow-2xl border border-slate-200">
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className="text-xl font-black text-slate-800"><i className="fas fa-cog text-indigo-500 mr-2"></i> Exam Settings</h3>
               <button onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-rose-500 transition hover:bg-rose-50 w-8 h-8 rounded-full flex items-center justify-center"><i className="fas fa-times text-lg"></i></button>
             </div>
             
-            <div className="space-y-5">
+            <div className="space-y-4 md:space-y-5">
                <div>
                  <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Exam Category</label>
                  <select value={examCategory} onChange={(e) => setExamCategory(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500">
@@ -440,7 +654,7 @@ export default function CreateMockPage() {
                  </select>
                </div>
 
-               <div className="grid grid-cols-2 gap-4">
+               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                  <div>
                    <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Duration (Mins)</label>
                    <input type="number" value={duration} onChange={(e) => setDuration(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500"/>
@@ -455,7 +669,7 @@ export default function CreateMockPage() {
                </div>
 
                <div>
-                 <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Availability (Student Dashboard)</label>
+                 <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Availability</label>
                  <select value={availability} onChange={(e) => setAvailability(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500">
                    <option value="always">Always Available</option>
                    <option value="12h">Available for 12 Hours</option>
@@ -481,103 +695,167 @@ export default function CreateMockPage() {
         </div>
       )}
 
-      {/* PUBLISHED SUCCESS SCREEN */}
-      {publishedRoomId && (
-        <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md z-[99999] flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
-          <div className="bg-white p-10 rounded-[2rem] shadow-2xl text-center max-w-md w-full">
-            <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-6"><i className="fas fa-check"></i></div>
-            <h2 className="text-3xl font-black text-slate-900 mb-3">Exam is Live!</h2>
-            <div className="bg-slate-50 p-4 rounded-2xl mb-8 border-2 border-slate-200"><span className="text-3xl font-mono font-black text-indigo-700">{publishedRoomId}</span></div>
-            <div className="flex flex-col gap-4">
-              <button onClick={() => window.location.reload()} className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold hover:bg-slate-700 transition">Create New</button>
-              <button onClick={() => router.push(`/educator/live-rooms/${publishedRoomId}`)} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition">View Live Room</button>
+      {isPublishing && !publishedRoomId && (
+        <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md z-[99999] flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="bg-white p-8 md:p-10 rounded-[2.5rem] shadow-2xl flex flex-col items-center max-w-sm w-[95%] border border-slate-100 relative overflow-hidden">
+            <div className="absolute -top-10 -right-10 w-32 h-32 bg-indigo-400/20 rounded-full blur-2xl"></div>
+            <div className="relative z-10 flex flex-col items-center">
+              <div className="relative w-24 h-24 mb-6">
+                <div className="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
+                <div className="absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
+                <i className="fas fa-cloud-upload-alt absolute inset-0 flex items-center justify-center text-3xl text-indigo-600 animate-pulse"></i>
+              </div>
+              <h3 className="text-2xl font-black text-slate-900 mb-3 text-center tracking-tight">Deploying Exam...</h3>
+              <p className="text-slate-500 text-center font-medium text-sm leading-relaxed">
+                Saving questions and securing the live room. Please do not close this window.
+              </p>
             </div>
           </div>
         </div>
       )}
 
-      <aside className="w-16 md:w-64 bg-indigo-950 text-white flex flex-col shrink-0 z-50 transition-all">
-        <div className="h-16 flex items-center justify-center md:justify-start md:px-6 border-b border-indigo-900">
-          <i className="fas fa-book-open-reader text-emerald-400 text-xl"></i>
-          <span className="hidden md:block ml-3 font-black tracking-tight text-lg">OZONE</span>
+      {publishedRoomId && (
+        <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md z-[99999] flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="bg-white p-8 md:p-10 rounded-[2.5rem] shadow-2xl text-center max-w-md w-[95%] relative overflow-hidden">
+            <div className="absolute -left-10 -bottom-10 w-40 h-40 bg-emerald-400/20 rounded-full blur-3xl pointer-events-none"></div>
+            <div className="relative z-10">
+              <div className="w-24 h-24 bg-gradient-to-br from-emerald-400 to-emerald-600 text-white rounded-full flex items-center justify-center text-5xl mx-auto mb-6 shadow-lg shadow-emerald-500/30 border-4 border-white"><i className="fas fa-check"></i></div>
+              <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3 tracking-tight">Exam is Live!</h2>
+              <p className="text-slate-500 font-medium mb-6 text-sm">Share this Room ID with your students:</p>
+              <div className="bg-slate-50 p-4 rounded-2xl mb-8 border-2 border-slate-200 shadow-inner flex items-center justify-center gap-4 group cursor-copy" onClick={handleCopyCode} title="Click to copy">
+                <span className="text-3xl md:text-4xl font-mono font-black text-indigo-700 tracking-wider">{publishedRoomId}</span>
+                <i className={`fas ${copied ? 'fa-check text-emerald-500' : 'fa-copy text-slate-300 group-hover:text-indigo-500'} text-xl transition-colors`}></i>
+              </div>
+              <div className="flex flex-col gap-3 md:gap-4">
+                <button onClick={() => router.push(`/educator/live-rooms/${publishedRoomId}`)} className="w-full bg-gradient-to-r from-indigo-600 to-indigo-700 text-white py-3.5 rounded-xl font-black hover:from-indigo-700 shadow-md transition hover:-translate-y-0.5 text-sm md:text-base">View Live Room Dashboard</button>
+                <button onClick={() => window.location.reload()} className="w-full bg-slate-100 text-slate-600 py-3.5 rounded-xl font-bold hover:bg-slate-200 transition text-sm md:text-base">Create Another Exam</button>
+              </div>
+            </div>
+          </div>
         </div>
-        <nav className="flex-1 p-3 space-y-2 mt-4">
-            <button onClick={() => router.push('/educator/dashboard')} className="w-full flex items-center justify-center md:justify-start gap-3 text-indigo-300 hover:bg-indigo-800 p-3 rounded-xl transition">
-                <i className="fas fa-home text-lg"></i> <span className="hidden md:block font-bold text-sm">Dashboard</span>
+      )}
+
+      {isMobileMenuOpen && ( <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)} /> )}
+
+      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-indigo-950 text-white flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
+        <div className="flex items-center justify-between p-5 border-b border-indigo-900">
+          <Link href="/onboarding?switch=true" className="text-xl font-black flex items-center gap-2 hover:text-emerald-400 transition cursor-pointer tracking-tight">
+            <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
+          </Link>
+          <button className="md:hidden text-indigo-300 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}><i className="fas fa-times text-lg"></i></button>
+        </div>
+        <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
+            <button onClick={() => router.push('/educator/dashboard')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
+                <i className="fas fa-home w-4"></i> Dashboard
             </button>
-            <button className="w-full flex items-center justify-center md:justify-start gap-3 bg-indigo-800 text-white p-3 rounded-xl border-l-4 border-emerald-400">
-                <i className="fas fa-pen-nib text-emerald-400 text-lg"></i> <span className="hidden md:block font-bold text-sm">Exam Studio</span>
+            <button onClick={() => router.push('/educator/create-mock')} className="w-full flex items-center gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-emerald-400 shadow-inner">
+                <i className="fas fa-file-pdf w-4 text-emerald-400"></i> Exam Studio
+            </button>
+            <button onClick={() => router.push('/educator/live-rooms')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
+                <i className="fas fa-door-open w-4"></i> Live Rooms
+            </button>
+            <button onClick={() => router.push('/educator/quiz-poll')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
+                <i className="fas fa-bolt w-4"></i> Live Quiz Poll
             </button>
         </nav>
+        <div className="p-3 border-t border-indigo-900 bg-indigo-900/30 space-y-1.5">
+            <div className="flex items-center gap-2.5 p-2.5 bg-indigo-950/50 rounded-xl border border-indigo-800/50 shadow-inner">
+                <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Educator"} alt="Avatar" className="w-7 h-7 rounded-full border border-indigo-700" />
+                <div className="text-xs font-bold truncate flex-1 text-indigo-100">{user?.fullName || "Account"}</div>
+            </div>
+            <button onClick={() => router.push('/onboarding?switch=true')} className="w-full flex items-center justify-center gap-2 text-indigo-300 hover:bg-indigo-800 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-transparent hover:border-indigo-700 shadow-sm">
+                <i className="fas fa-exchange-alt"></i> Switch Role
+            </button>
+            <button onClick={() => signOut({ redirectUrl: '/' })} className="w-full flex items-center justify-center gap-2 text-rose-400 hover:bg-rose-600 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-rose-900/50 hover:border-rose-500 bg-rose-950/20 shadow-sm">
+                <i className="fas fa-sign-out-alt"></i> Log Out
+            </button>
+        </div>
       </aside>
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         
-        {/* HEADER (NOW WITH SETTINGS BUTTON) */}
-        <header className="bg-white border-b border-slate-200 h-16 px-6 flex justify-between items-center z-20 shrink-0 shadow-sm">
-          <input type="text" value={examTitle} onChange={(e) => setExamTitle(e.target.value)} className="text-lg font-black text-slate-900 bg-transparent border-b-2 border-transparent hover:border-slate-200 focus:border-indigo-500 outline-none w-full max-w-sm transition-colors" placeholder="Untitled Exam" />
+        <header className="bg-white border-b border-slate-200 h-auto md:h-16 py-3 px-4 md:px-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-0 z-20 shrink-0 shadow-sm">
+          <div className="flex items-center gap-3 w-full md:max-w-[60%]">
+             <button className="md:hidden text-slate-600 shrink-0" onClick={() => setIsMobileMenuOpen(true)}><i className="fas fa-bars text-xl"></i></button>
+             
+             <button onClick={handleBackNavigation} className="shrink-0 bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50 transition-all flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-sm" title="Back to Dashboard">
+               <i className="fas fa-arrow-left"></i> <span className="hidden sm:block">Back</span>
+             </button>
+             
+             <input type="text" value={examTitle} onChange={(e) => setExamTitle(e.target.value)} className="text-base md:text-lg font-black text-slate-900 bg-transparent border-b-2 border-transparent hover:border-slate-200 focus:border-indigo-500 outline-none w-full transition-colors truncate" placeholder="Untitled Exam" />
+          </div>
           
-          <div className="flex items-center gap-3">
-            <button onClick={() => setShowSettingsModal(true)} className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold shadow-sm hover:bg-slate-200 transition flex items-center gap-2 border border-slate-200">
-              <i className="fas fa-cog"></i> <span className="hidden sm:block">Settings</span>
+          <div className="flex items-center gap-2 md:gap-3 w-full md:w-auto justify-end shrink-0">
+            <button onClick={() => setShowSettingsModal(true)} className="flex-1 md:flex-none justify-center bg-slate-100 text-slate-600 px-3 py-2 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-sm hover:bg-slate-200 transition flex items-center gap-2 border border-slate-200">
+              <i className="fas fa-cog"></i> <span>Settings</span>
             </button>
-            <button onClick={saveToDatabase} disabled={questions.length === 0 || uploadingCount > 0 || isPublishing} className="bg-emerald-600 text-white px-6 py-2 rounded-lg text-sm font-bold shadow-md hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-              {isPublishing ? <><i className="fas fa-spinner fa-spin"></i> Deploying...</> : <><i className="fas fa-paper-plane"></i> Publish</>}
+            <button id="tour-publish" onClick={saveToDatabase} disabled={questions.length === 0 || uploadingCount > 0 || isPublishing} className="flex-1 md:flex-none justify-center bg-emerald-600 text-white px-4 py-2 md:px-6 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-md hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+              {isPublishing ? <><i className="fas fa-spinner fa-spin"></i> <span>Deploying...</span></> : <><i className="fas fa-paper-plane"></i> Publish</>}
             </button>
           </div>
         </header>
 
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
           
-          <div className={`transition-all duration-500 ease-in-out border-r border-slate-300 bg-slate-200 flex flex-col relative ${pdfUrl ? 'w-1/2' : 'w-0 opacity-0 overflow-hidden'}`}>
-            <div className="h-12 bg-slate-800 text-white flex items-center justify-between px-4 shrink-0 shadow-md z-10">
-              <span className="text-xs font-bold truncate flex-1"><i className="fas fa-file-pdf text-rose-400 mr-2"></i> {file?.name}</span>
+          <div className={`transition-all duration-500 ease-in-out border-b lg:border-b-0 lg:border-r border-slate-300 bg-slate-200 flex flex-col relative ${pdfUrl ? 'h-1/2 lg:h-full lg:w-1/2' : 'h-0 lg:w-0 lg:h-full opacity-0 overflow-hidden'}`}>
+            <div className="h-10 md:h-12 bg-slate-800 text-white flex items-center justify-between px-4 shrink-0 shadow-md z-10">
+              <span className="text-[10px] md:text-xs font-bold truncate flex-1"><i className="fas fa-file-pdf text-rose-400 mr-2"></i> {file?.name}</span>
             </div>
             {pdfUrl && <iframe src={`${pdfUrl}#toolbar=0`} className="w-full flex-1 border-none" title="PDF Viewer" />}
           </div>
 
-          <div className={`flex-1 flex flex-col bg-slate-50 transition-all duration-500 overflow-hidden ${pdfUrl ? 'w-1/2' : 'w-full'}`}>
+          <div className={`flex-1 flex flex-col bg-slate-50 transition-all duration-500 overflow-hidden ${pdfUrl ? 'h-1/2 lg:h-full lg:w-1/2' : 'h-full w-full'}`}>
             
-            <div className="bg-white p-4 border-b border-slate-200 shrink-0 shadow-sm flex flex-wrap gap-4 items-center justify-between">
-              <div className="flex items-center gap-3">
-                <label className="bg-slate-100 border border-slate-300 text-slate-800 px-4 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-slate-200 transition">
-                  <i className="fas fa-upload mr-2 text-slate-600"></i> Upload PDF
+            <div id="tour-pdf-extract" className="bg-white p-3 md:p-4 border-b border-slate-200 shrink-0 shadow-sm flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between z-10">
+              <div className="flex items-center gap-2 w-full xl:w-auto">
+                <label className="flex-1 xl:flex-none justify-center bg-slate-100 border border-slate-300 text-slate-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-slate-200 transition flex items-center shadow-sm">
+                  <i className="fas fa-upload mr-2 text-rose-500"></i> <span>Upload PDF</span>
                   <input type="file" accept="application/pdf" className="hidden" onChange={handleFileChange} />
                 </label>
-                
-                <label className="bg-indigo-50 border border-indigo-200 text-indigo-800 px-4 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-100 transition">
-                  <i className="fas fa-camera mr-2 text-indigo-600"></i> Scan Phone
+                <label className="flex-1 xl:flex-none justify-center bg-indigo-50 border border-indigo-200 text-indigo-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-100 transition flex items-center shadow-sm">
+                  <i className="fas fa-camera mr-2 text-indigo-600"></i> <span>Scan Phone</span>
                   <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => {
                     const imgFile = e.target.files[0];
-                    if (imgFile) { setFile(imgFile); setPdfUrl(null); showToast("Photo captured! Please use 'Extract Qs' or crop manually.", "success"); }
+                    if (imgFile) { setFile(imgFile); setPdfUrl(null); showToast("Photo captured! Use 'Extract Qs' or crop.", "success"); }
                   }} />
                 </label>
-
-                <div className="h-6 w-px bg-slate-300 mx-2"></div>
-
-                <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg border border-slate-200">
-                  <input type="number" value={startPage} onChange={e => setStartPage(e.target.value)} className="w-10 text-center text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded py-1 outline-none"/>
-                  <span className="text-[10px] text-slate-600 font-bold">to</span>
-                  <input type="number" value={endPage} onChange={e => setEndPage(e.target.value)} className="w-10 text-center text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded py-1 outline-none"/>
-                </div>
-                <button onClick={handleExtract} disabled={!file || isProcessing} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-md hover:bg-indigo-700 disabled:opacity-50 transition">
-                  {isProcessing ? <><i className="fas fa-spinner fa-spin"></i> Extracting</> : "Extract Qs"}
-                </button>
               </div>
 
-              <button onClick={handleAddCustomQuestion} className="text-emerald-700 bg-emerald-50 px-4 py-2 rounded-lg text-xs font-bold border border-emerald-300 hover:bg-emerald-100 transition shadow-sm">
-                <i className="fas fa-plus mr-1"></i> Blank Q
-              </button>
+              <div className="flex items-center gap-3 w-full xl:w-auto justify-between xl:justify-end">
+                 <div id="tour-page-range" className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200">
+                   <input type="number" min="1" value={startPage} onChange={e => setStartPage(e.target.value)} className="w-10 text-center text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded py-1 outline-none focus:border-indigo-500 shadow-inner"/>
+                   <span className="text-[10px] text-slate-400 font-black uppercase">To</span>
+                   <input type="number" min="1" value={endPage} onChange={e => setEndPage(e.target.value)} className="w-10 text-center text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded py-1 outline-none focus:border-indigo-500 shadow-inner"/>
+                 </div>
+                 
+                 <div id="tour-ai-solutions" className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-100 shadow-sm">
+                    <span className="text-[10px] font-black text-indigo-700 hidden sm:block">AI Solutions</span>
+                    <i className="fas fa-brain text-indigo-500 sm:hidden"></i>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" checked={generateExplanations} onChange={(e) => setGenerateExplanations(e.target.checked)} className="sr-only peer" />
+                      <div className="w-7 h-4 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500"></div>
+                    </label>
+                 </div>
+
+                 <button onClick={handleExtract} disabled={!file || isProcessing} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-md hover:bg-indigo-600 disabled:opacity-50 disabled:bg-slate-400 transition flex items-center gap-1.5">
+                   {isProcessing ? <><i className="fas fa-spinner fa-spin"></i></> : <><i className="fas fa-magic"></i> <span className="hidden sm:block">Extract</span></>}
+                 </button>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
+            <div className="flex-1 overflow-y-auto p-3 md:p-6 scroll-smooth bg-slate-50/50">
               <div className="max-w-4xl mx-auto space-y-4 pb-32">
                 
                 {questions.length === 0 ? (
-                  <div className="mt-20 flex flex-col items-center justify-center text-slate-500 text-center">
-                    <div className="w-24 h-24 bg-slate-200 rounded-full flex items-center justify-center text-4xl mb-4"><i className="fas fa-file-contract"></i></div>
-                    <h3 className="text-lg font-black text-slate-700 mb-1">Your Exam is Empty</h3>
-                    <p className="text-sm font-medium max-w-md text-slate-500">Upload a PDF on the top left to use the Split-Screen AI Extractor, or scan a physical book with your phone.</p>
+                  <div className="mt-10 md:mt-20 flex flex-col items-center justify-center animate-in fade-in zoom-in duration-500 px-4">
+                     <div className="w-24 h-24 bg-indigo-50 text-indigo-400 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-inner border border-indigo-100/50 transform -rotate-3"><i className="fas fa-file-signature"></i></div>
+                     <h2 className="text-2xl md:text-3xl font-black text-slate-800 mb-3 text-center tracking-tight">Your Exam is Empty</h2>
+                     <p className="text-sm font-medium text-slate-500 max-w-md text-center mb-8 leading-relaxed">Upload a document to the top bar to extract questions using Gemini AI, or start building your exam manually.</p>
+                     
+                     <button id="tour-manual-build" onClick={handleAddCustomQuestion} disabled={isProcessing} className="bg-emerald-500 text-white px-8 py-4 rounded-xl font-black hover:bg-emerald-600 hover:-translate-y-1 transition-all text-sm md:text-base shadow-lg shadow-emerald-500/30 flex items-center gap-3 group relative overflow-hidden w-full sm:w-auto justify-center">
+                       <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500"></div>
+                       <i className="fas fa-plus text-lg"></i> Build from Scratch
+                     </button>
                   </div>
                 ) : (
                   questions.map((q, qIndex) => {
@@ -586,9 +864,9 @@ export default function CreateMockPage() {
                     return (
                       <div key={qIndex} ref={el => questionRefs.current[qIndex] = el} className={`bg-white border rounded-2xl transition-all duration-200 overflow-hidden ${isExpanded ? 'border-indigo-400 shadow-xl ring-4 ring-indigo-50/50' : 'border-slate-200 shadow-sm hover:border-slate-300'}`}>
                         
-                        <div onClick={() => setExpandedQIndex(isExpanded ? null : qIndex)} className={`p-4 flex items-center gap-4 cursor-pointer select-none transition-colors ${isExpanded ? 'bg-indigo-50/50 border-b border-indigo-100' : 'hover:bg-slate-50'}`}>
+                        <div onClick={() => setExpandedQIndex(isExpanded ? null : qIndex)} className={`p-4 flex items-center gap-3 md:gap-4 cursor-pointer select-none transition-colors ${isExpanded ? 'bg-indigo-50/50 border-b border-indigo-100' : 'hover:bg-slate-50'}`}>
                           <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${isExpanded ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-700'}`}>{qIndex + 1}</div>
-                          <div className="flex-1 min-w-0 flex items-center gap-3">
+                          <div className="flex-1 min-w-0 flex items-center gap-2 md:gap-3">
                             <span className="text-[10px] font-black px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">{q.type}</span>
                             <div className="text-sm font-bold text-slate-900 truncate overflow-hidden whitespace-nowrap"><Latex>{q.text || "Empty Question..."}</Latex></div>
                           </div>
@@ -596,14 +874,14 @@ export default function CreateMockPage() {
                         </div>
 
                         {isExpanded && (
-                          <div className="p-5 bg-white">
+                          <div className="p-4 md:p-5 bg-white">
                             
-                            <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-100">
-                               <div className="flex gap-4">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 pb-4 border-b border-slate-100 gap-4">
+                               <div className="flex flex-wrap gap-4 w-full sm:w-auto">
                                   <select value={q.type || "MCQ"} onChange={(e) => handleTypeChange(qIndex, e.target.value)} className="bg-slate-50 border border-slate-300 rounded-lg text-xs px-3 py-1.5 font-bold text-slate-900 outline-none focus:border-indigo-400 cursor-pointer shadow-sm">
                                       <option value="MCQ">MCQ</option> <option value="MSQ">MSQ</option> <option value="NAT">NAT</option>
                                   </select>
-                                  <div className="flex items-center gap-2 border-l border-slate-200 pl-4">
+                                  <div className="flex items-center gap-2 sm:border-l border-slate-200 sm:pl-4">
                                     <span className="text-[10px] font-black text-emerald-700 uppercase">+ Mk:</span>
                                     <input type="number" step="0.5" value={q.marks} onChange={(e) => updateQuestionField(qIndex, 'marks', e.target.value)} className="w-14 bg-white border border-slate-300 rounded text-xs px-2 py-1 text-center font-black text-slate-900 outline-none shadow-sm focus:border-emerald-500"/>
                                   </div>
@@ -613,7 +891,7 @@ export default function CreateMockPage() {
                                   </div>
                                </div>
                                
-                               <label className="text-[10px] font-black text-indigo-700 bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-200 cursor-pointer hover:bg-indigo-100 hover:shadow-md transition inline-flex items-center gap-1.5 shadow-sm">
+                               <label className="text-[10px] font-black text-indigo-700 bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-200 cursor-pointer hover:bg-indigo-100 hover:shadow-md transition inline-flex items-center justify-center gap-1.5 shadow-sm w-full sm:w-auto">
                                  <i className="fas fa-crop-alt"></i> Upload Diagram
                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => initiateImageUpload(e.target.files[0], qIndex, 'question')} />
                                </label>
@@ -629,7 +907,7 @@ export default function CreateMockPage() {
 
                             <div className="mb-3 p-4 bg-emerald-50/50 rounded-xl border border-emerald-200 shadow-sm">
                               <span className="text-[9px] font-black uppercase text-emerald-700 block mb-1">Student Preview</span>
-                              <div className="text-sm font-bold text-slate-900 leading-relaxed"><Latex>{q.text || "Type your question below..."}</Latex></div>
+                              <div className="text-sm font-bold text-slate-900 leading-relaxed overflow-x-auto"><Latex>{q.text || "Type your question below..."}</Latex></div>
                             </div>
 
                             <div className="relative mb-6 mt-2">
@@ -647,63 +925,84 @@ export default function CreateMockPage() {
                             {q.type === 'NAT' ? (
                               <div className="bg-slate-50 p-4 rounded-xl border border-slate-300 mb-6 shadow-inner">
                                 <label className="block text-[10px] font-black text-slate-600 mb-2 uppercase">Numerical Answer</label>
-                                <input type="text" value={q.correctAnswer || ''} onChange={(e) => updateQuestionField(qIndex, 'correctAnswer', e.target.value)} className="w-full max-w-xs bg-white border border-slate-300 rounded-lg p-3 text-sm font-black text-slate-900 outline-none focus:border-indigo-500 shadow-sm" />
+                                <input type="text" value={q.correctAnswer || ''} onChange={(e) => updateQuestionField(qIndex, 'correctAnswer', e.target.value)} className="w-full sm:max-w-xs bg-white border border-slate-300 rounded-lg p-3 text-lg font-black text-slate-900 outline-none focus:border-indigo-500 shadow-sm" />
                               </div>
                             ) : (
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                                {q.options?.map((opt, optIndex) => {
-                                  const isCorrect = q.correctAnswer === opt.id;
-                                  return (
-                                    <div key={optIndex} className={`flex items-start gap-3 p-3 rounded-xl border transition-colors ${isCorrect ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-300' : 'border-slate-300 bg-slate-50 hover:border-slate-400'}`}>
-                                      <input type="radio" checked={isCorrect} onChange={() => updateQuestionField(qIndex, 'correctAnswer', opt.id)} className="mt-2 w-4 h-4 accent-emerald-600 cursor-pointer" />
-                                      <div className="flex-1 min-w-0">
-                                        
-                                        <div className="relative mb-2">
-                                          <input type="text" value={opt.text} onChange={(e) => updateOptionText(qIndex, optIndex, e.target.value)} onPaste={(e) => handlePaste(e, qIndex, 'option', optIndex)} placeholder={`Option ${opt.id}...`} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 pr-10 text-xs font-bold text-slate-900 focus:border-indigo-500 outline-none shadow-sm" />
-                                          <button onClick={() => toggleDictation(qIndex, 'option', optIndex)} className={`absolute top-1.5 right-1.5 p-1.5 rounded transition border ${listeningField === `q-${qIndex}-opt-${optIndex}` ? 'bg-rose-100 text-rose-600 border-rose-200 animate-pulse' : 'bg-slate-100 text-slate-400 border-transparent hover:text-indigo-600 hover:bg-white hover:border-slate-200'}`}>
-                                            <i className="fas fa-microphone"></i>
-                                          </button>
-                                        </div>
-
-                                        <div className="flex items-center justify-between mt-1 px-1 gap-2">
-                                           <div className="text-[10px] font-black text-slate-700 truncate overflow-hidden"><Latex>{opt.text}</Latex></div>
-                                           <label className="shrink-0 text-[10px] font-black text-indigo-700 cursor-pointer hover:bg-indigo-100 transition bg-indigo-50 px-2 py-1 rounded border border-indigo-200 shadow-sm">
-                                             <i className="fas fa-image mr-1"></i> Add Image
-                                             <input type="file" accept="image/*" className="hidden" onChange={(e) => initiateImageUpload(e.target.files[0], qIndex, 'option', optIndex)} />
-                                           </label>
-                                        </div>
-
-                                        {opt.imageUrl && (
-                                          <div className="relative mt-2 inline-block border border-slate-300 rounded-lg bg-slate-100 p-1 shadow-inner">
-                                             <button onClick={() => removeImage(qIndex, 'option', optIndex)} className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] shadow-md hover:scale-110"><i className="fas fa-times"></i></button>
-                                             {opt.isUploading && <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10"><i className="fas fa-spinner fa-spin text-indigo-600 text-xs"></i></div>}
-                                             <img src={opt.imageUrl} className={`max-h-20 object-contain rounded ${opt.isUploading ? 'opacity-30' : ''}`} />
+                              <>
+                                <div className="flex justify-between items-center mb-3">
+                                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Answer Choices</span>
+                                  <button onClick={() => generateOptions(qIndex)} disabled={q.isGeneratingOptions} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[10px] font-black px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow-sm border border-indigo-200 disabled:opacity-50">
+                                    {q.isGeneratingOptions ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-wand-magic-sparkles"></i>} 
+                                    <span className="hidden sm:inline">AI Auto-Fill Options</span>
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                                  {q.options?.map((opt, optIndex) => {
+                                    const isCorrect = q.type === 'MSQ' ? (Array.isArray(q.correctAnswer) && q.correctAnswer.includes(opt.id)) : q.correctAnswer === opt.id;
+                                    return (
+                                      <div key={optIndex} className={`flex items-start gap-3 p-3 rounded-xl border transition-colors ${isCorrect ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-300' : 'border-slate-300 bg-slate-50 hover:border-slate-400'}`}>
+                                        <input type={q.type === "MSQ" ? "checkbox" : "radio"} checked={isCorrect} onChange={() => q.type === "MSQ" ? toggleMsqAnswer(qIndex, opt.id) : updateQuestionField(qIndex, 'correctAnswer', opt.id)} className="mt-2 w-4 h-4 accent-emerald-600 cursor-pointer shrink-0" />
+                                        <div className="flex-1 min-w-0">
+                                          
+                                          <div className="relative mb-2">
+                                            <input type="text" value={opt.text} onChange={(e) => updateOptionText(qIndex, optIndex, e.target.value)} onPaste={(e) => handlePaste(e, qIndex, 'option', optIndex)} placeholder={`Option ${opt.id}...`} className={`w-full bg-white border border-slate-300 rounded-lg p-2.5 pr-10 text-xs font-bold text-slate-900 focus:border-indigo-500 outline-none shadow-sm ${q.isGeneratingOptions ? 'opacity-50 animate-pulse' : ''}`} disabled={q.isGeneratingOptions} />
+                                            <button onClick={() => toggleDictation(qIndex, 'option', optIndex)} className={`absolute top-1.5 right-1.5 p-1.5 rounded transition border ${listeningField === `q-${qIndex}-opt-${optIndex}` ? 'bg-rose-100 text-rose-600 border-rose-200 animate-pulse' : 'bg-slate-100 text-slate-400 border-transparent hover:text-indigo-600 hover:bg-white hover:border-slate-200'}`}>
+                                              <i className="fas fa-microphone"></i>
+                                            </button>
                                           </div>
-                                        )}
+
+                                          <div className="flex flex-col sm:flex-row sm:items-center justify-between mt-1 px-1 gap-2">
+                                             <div className="text-[10px] font-black text-slate-700 truncate overflow-x-auto max-w-[150px]"><Latex>{opt.text}</Latex></div>
+                                             <label className="shrink-0 text-[10px] font-black text-indigo-700 cursor-pointer hover:bg-indigo-100 transition bg-indigo-50 px-2 py-1 rounded border border-indigo-200 shadow-sm self-start sm:self-auto">
+                                               <i className="fas fa-image mr-1"></i> Add Image
+                                               <input type="file" accept="image/*" className="hidden" onChange={(e) => initiateImageUpload(e.target.files[0], qIndex, 'option', optIndex)} />
+                                             </label>
+                                          </div>
+
+                                          {opt.imageUrl && (
+                                            <div className="relative mt-2 inline-block border border-slate-300 rounded-lg bg-slate-100 p-1 shadow-inner">
+                                               <button onClick={() => removeImage(qIndex, 'option', optIndex)} className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] shadow-md hover:scale-110"><i className="fas fa-times"></i></button>
+                                               {opt.isUploading && <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10"><i className="fas fa-spinner fa-spin text-indigo-600 text-xs"></i></div>}
+                                               <img src={opt.imageUrl} className={`max-h-20 object-contain rounded ${opt.isUploading ? 'opacity-30' : ''}`} />
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
+                                    );
+                                  })}
+                                </div>
+                              </>
                             )}
 
                             <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 shadow-sm">
-                              <div className="flex items-center justify-between mb-3">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-3">
                                 <span className="text-indigo-800 text-[10px] font-black uppercase tracking-wide"><i className="fas fa-lightbulb mr-1"></i> Solution</span>
-                                <div className="flex gap-2">
-                                  <label className="bg-white border border-indigo-300 hover:bg-indigo-50 text-indigo-700 text-[10px] font-black px-3 py-1.5 rounded-lg shadow-sm transition cursor-pointer">
+                                <div className="flex flex-wrap gap-2">
+                                  <label className="bg-white border border-indigo-300 hover:bg-indigo-50 text-indigo-700 text-[10px] font-black px-3 py-1.5 rounded-lg shadow-sm transition cursor-pointer flex-1 sm:flex-none text-center">
                                     <i className="fas fa-image"></i> Attach Image
                                     <input type="file" accept="image/*" className="hidden" onChange={(e) => initiateImageUpload(e.target.files[0], qIndex, 'explanation')} />
                                   </label>
-                                  <button onClick={() => generateSolution(qIndex)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black px-3 py-1.5 rounded-lg shadow-sm transition flex items-center gap-1.5">
-                                    <i className="fas fa-wand-magic-sparkles"></i> AI Solve
+                                  <button onClick={() => generateSolution(qIndex)} disabled={q.isGeneratingSolution} className="bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black px-3 py-1.5 rounded-lg shadow-sm transition flex items-center justify-center gap-1.5 flex-1 sm:flex-none disabled:opacity-50">
+                                    {q.isGeneratingSolution ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-wand-magic-sparkles"></i>} 
+                                    AI Solve
                                   </button>
                                 </div>
                               </div>
+
+                              {q.explanation && (
+                                <div className="mb-3 p-4 bg-white rounded-xl border border-indigo-100 shadow-sm">
+                                  <span className="text-[9px] font-black uppercase text-indigo-400 block mb-1">Solution Preview</span>
+                                  <div className="text-sm font-medium text-slate-800 leading-relaxed overflow-x-auto">
+                                    <Latex>{q.explanation}</Latex>
+                                  </div>
+                                </div>
+                              )}
+
                               <textarea 
                                 value={q.explanation || ""} onChange={(e) => updateQuestionField(qIndex, 'explanation', e.target.value)} onPaste={(e) => handlePaste(e, qIndex, 'explanation')}
-                                className="w-full bg-white border border-indigo-200 rounded-lg p-3 text-xs font-bold text-slate-900 outline-none focus:border-indigo-500 resize-y min-h-[60px] shadow-inner transition-shadow" 
+                                className={`w-full bg-white border border-indigo-200 rounded-lg p-3 text-xs font-bold text-slate-900 outline-none focus:border-indigo-500 resize-y min-h-[60px] shadow-inner transition-shadow ${q.isGeneratingSolution ? 'opacity-50 animate-pulse' : ''}`} 
                                 placeholder="Type explanation, or click 'AI Solve' above..." 
+                                disabled={q.isGeneratingSolution}
                               />
                               
                               {q.explanationImage && (
@@ -720,6 +1019,20 @@ export default function CreateMockPage() {
                     );
                   })
                 )}
+
+                {questions.length > 0 && (
+                  <div className="pt-6 pb-12 flex justify-center animate-in fade-in">
+                    <button 
+                      onClick={handleAddCustomQuestion} 
+                      disabled={isProcessing} 
+                      className="bg-white border-2 border-dashed border-emerald-300 text-emerald-600 px-8 py-4 rounded-2xl font-black hover:bg-emerald-50 hover:border-emerald-500 hover:-translate-y-1 transition-all shadow-sm flex items-center gap-3 group w-full max-w-md justify-center disabled:opacity-50"
+                    >
+                      <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform"><i className="fas fa-plus text-emerald-600 text-lg"></i></div>
+                      Add Another Question
+                    </button>
+                  </div>
+                )}
+
               </div>
             </div>
 

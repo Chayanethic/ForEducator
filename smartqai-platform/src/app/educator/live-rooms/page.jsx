@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-// 1. CHANGED: Import useClerk instead of UserButton
 import { useUser, useClerk } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -10,12 +9,12 @@ import { db } from "@/lib/firebase";
 
 export default function LiveRoomsHub() {
   const { user, isLoaded, isSignedIn } = useUser();
-  // 2. NEW: Bring in the signOut function from Clerk
   const { signOut } = useClerk();
   const router = useRouter();
   
   const [myRooms, setMyRooms] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [toast, setToast] = useState({ show: false, message: "", type: "success" });
   const [confirmDialog, setConfirmDialog] = useState({ show: false, mockId: null, title: "" });
@@ -86,194 +85,187 @@ export default function LiveRoomsHub() {
     showToast("Room ID copied to clipboard!", "success");
   };
 
-  if (!isLoaded || isLoading) return <div className="flex h-screen items-center justify-center bg-slate-50"><i className="fas fa-spinner fa-spin text-4xl text-emerald-600"></i></div>;
-  if (!isSignedIn) return <div className="p-10 text-center">Please log in.</div>;
+  // --- BRANDED LOADING SCREEN ---
+  if (!isLoaded || isLoading) return (
+    <div className="flex h-screen items-center justify-center bg-slate-50 flex-col animate-in fade-in duration-500">
+      <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-indigo-700 text-indigo-50 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-xl shadow-indigo-900/30 border border-indigo-400/30 transform -rotate-3 animate-pulse">
+        <i className="fas fa-door-open"></i>
+      </div>
+      <h2 className="text-xl font-black text-slate-900 tracking-tight animate-pulse">Loading Rooms...</h2>
+    </div>
+  );
+
+  if (!isSignedIn) return <div className="p-10 text-center font-bold text-slate-500">Please log in to view your live rooms.</div>;
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans relative overflow-hidden">
       
-      <style dangerouslySetInnerHTML={{__html: `
-        @keyframes slideUp {
-          from { transform: translateY(100%); opacity: 0; }
-          to { transform: translateY(0); opacity: 1; }
-        }
-        .animate-slide-up { animation: slideUp 0.3s ease-out forwards; }
-      `}} />
-
-      {/* CUSTOM TOAST NOTIFICATION */}
+      {/* PREMIUM UPGRADE: GLASSMORPHISM TOAST NOTIFICATION */}
       {toast.show && (
-        <div className={`fixed bottom-8 right-8 px-6 py-4 rounded-xl shadow-2xl z-50 flex items-center gap-3 animate-slide-up ${toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
-          <i className={`fas ${toast.type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'} text-xl`}></i>
-          <span className="font-bold tracking-wide">{toast.message}</span>
+        <div className={`fixed bottom-6 right-6 px-6 py-4 rounded-2xl shadow-2xl z-[9999] flex items-center gap-4 animate-in slide-in-from-bottom-5 backdrop-blur-xl border border-white/20 
+          ${toast.type === 'success' ? 'bg-emerald-600/90 text-white' : 'bg-rose-600/90 text-white'}`}>
+          <div className="bg-white/20 w-8 h-8 rounded-full flex items-center justify-center shrink-0">
+             <i className={`fas ${toast.type === 'success' ? 'fa-check' : 'fa-exclamation'} text-sm`}></i>
+          </div>
+          <span className="font-bold text-sm tracking-wide">{toast.message}</span>
         </div>
       )}
 
-      {/* CUSTOM CONFIRMATION MODAL */}
+      {/* PREMIUM UPGRADE: DELETE CONFIRMATION MODAL */}
       {confirmDialog.show && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-          <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center transform transition-all scale-100">
-            <div className="w-20 h-20 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">
-              <i className="fas fa-exclamation-triangle"></i>
-            </div>
-            <h2 className="text-2xl font-black text-slate-800 mb-2">Delete Exam?</h2>
-            <p className="text-slate-500 mb-8 leading-relaxed">
-              Are you sure you want to permanently delete <strong className="text-slate-700">{confirmDialog.title}</strong>? This action cannot be undone and will remove it from all student dashboards.
-            </p>
-            <div className="flex gap-4">
-              <button 
-                onClick={() => setConfirmDialog({ show: false, mockId: null, title: "" })} 
-                className="flex-1 bg-slate-100 text-slate-700 py-3.5 rounded-xl font-bold hover:bg-slate-200 transition"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={executeDelete} 
-                className="flex-1 bg-rose-600 text-white py-3.5 rounded-xl font-bold hover:bg-rose-700 transition shadow-lg shadow-rose-500/30"
-              >
-                Yes, Delete
-              </button>
-            </div>
-          </div>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
+           <div className="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-[95%] shadow-2xl border border-slate-200 animate-in zoom-in-95 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-2 bg-rose-500"></div>
+              <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center text-3xl mb-4 mx-auto"><i className="fas fa-exclamation-triangle"></i></div>
+              <h3 className="text-xl font-black text-slate-800 mb-2 text-center">Delete Exam?</h3>
+              <p className="text-sm font-medium text-slate-500 mb-8 text-center leading-relaxed">
+                Are you sure you want to permanently delete <strong className="text-slate-700">{confirmDialog.title}</strong>? This action cannot be undone and will remove it from all student dashboards.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center w-full">
+                 <button onClick={() => setConfirmDialog({ show: false, mockId: null, title: "" })} className="px-6 py-3 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition w-full sm:w-1/2">Cancel</button>
+                 <button onClick={executeDelete} className="px-6 py-3 text-sm font-bold text-white bg-rose-500 hover:bg-rose-600 rounded-xl transition shadow-md shadow-rose-500/20 w-full sm:w-1/2">Yes, Delete</button>
+              </div>
+           </div>
         </div>
       )}
 
       {/* DELETING PROCESSING SCREEN */}
       {isDeleting && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[60] flex flex-col items-center justify-center">
-          <i className="fas fa-circle-notch fa-spin text-5xl text-rose-500 mb-6"></i>
-          <h2 className="text-white text-2xl font-bold animate-pulse">Deleting Exam Data...</h2>
-          <p className="text-slate-400 mt-2">Clearing database records securely.</p>
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[9999] flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="bg-white p-10 rounded-[2rem] shadow-2xl flex flex-col items-center max-w-sm w-full border border-slate-100 relative overflow-hidden">
+            <div className="relative w-20 h-20 mb-6">
+              <div className="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
+              <div className="absolute inset-0 border-4 border-rose-500 rounded-full border-t-transparent animate-spin"></div>
+              <i className="fas fa-trash-alt absolute inset-0 flex items-center justify-center text-2xl text-rose-600"></i>
+            </div>
+            <h3 className="text-xl font-black text-slate-900 mb-2 text-center tracking-tight">Deleting Exam Data...</h3>
+            <p className="text-slate-500 text-center font-medium text-sm">Clearing database records securely.</p>
+          </div>
         </div>
       )}
 
-      {/* EDUCATOR SIDEBAR */}
-      <aside className="w-64 bg-slate-900 text-white flex-col hidden md:flex shrink-0 z-10">
-        <Link href="/onboarding?switch=true" className="p-6 text-2xl font-bold flex items-center gap-2 border-b border-slate-800 hover:text-emerald-400 transition cursor-pointer block">
-          
-           <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
-        
-        </Link>
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-            <button 
-              onClick={() => router.push('/educator/create-mock')}
-              className="w-full flex items-center gap-3 text-slate-400 hover:bg-slate-800 hover:text-white p-3 rounded-lg transition"
-            >
-                <i className="fas fa-file-pdf w-5"></i> AI PDF Extractor
+      {/* MOBILE MENU OVERLAY */}
+      {isMobileMenuOpen && ( <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)} /> )}
+
+      {/* UNIFIED INDIGO SIDEBAR */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-indigo-950 text-white flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
+        <div className="flex items-center justify-between p-5 border-b border-indigo-900">
+          <Link href="/onboarding?switch=true" className="text-xl font-black flex items-center gap-2 hover:text-emerald-400 transition cursor-pointer tracking-tight">
+            <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
+          </Link>
+          <button className="md:hidden text-indigo-300 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}><i className="fas fa-times text-lg"></i></button>
+        </div>
+        <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
+            <button onClick={() => router.push('/educator/dashboard')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
+                <i className="fas fa-home w-4"></i> Dashboard
             </button>
-            <button 
-              onClick={() => router.push('/educator/live-rooms')}
-              className="w-full flex items-center gap-3 bg-slate-800 text-white p-3 rounded-lg font-medium border-l-4 border-emerald-500"
-            >
-                <i className="fas fa-door-open w-5"></i> Live Rooms
+            <button onClick={() => router.push('/educator/create-mock')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
+                <i className="fas fa-file-pdf w-4"></i> Exam Studio
+            </button>
+            <button onClick={() => router.push('/educator/live-rooms')} className="w-full flex items-center gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-emerald-400 shadow-inner">
+                <i className="fas fa-door-open w-4 text-emerald-400"></i> Live Rooms
+            </button>
+            <button onClick={() => router.push('/educator/quiz-poll')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
+                <i className="fas fa-bolt w-4"></i> Live Quiz Poll
             </button>
         </nav>
         
-        {/* --- 3. UPGRADED: BOTTOM PROFILE & LOGOUT BUTTON --- */}
-        <div className="p-4 border-t border-slate-800 bg-slate-950/50 space-y-2">
-            
-            {/* Static User Profile Badge */}
-            <div className="flex items-center gap-3 p-3 bg-slate-900 rounded-lg border border-slate-800 shadow-inner">
-                <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Educator"} alt="Avatar" className="w-8 h-8 rounded-full border border-slate-700" />
-                <div className="text-sm font-medium truncate flex-1 text-slate-300">{user?.fullName || "Account"}</div>
+        <div className="p-3 border-t border-indigo-900 bg-indigo-900/30 space-y-1.5">
+            <div className="flex items-center gap-2.5 p-2.5 bg-indigo-950/50 rounded-xl border border-indigo-800/50 shadow-inner">
+                <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Educator"} alt="Avatar" className="w-7 h-7 rounded-full border border-indigo-700" />
+                <div className="text-xs font-bold truncate flex-1 text-indigo-100">{user?.fullName || "Account"}</div>
             </div>
-
-            {/* Switch Role Button */}
-            <button 
-              onClick={() => router.push('/onboarding?switch=true')}
-              className="w-full flex items-center justify-center gap-2 text-slate-400 hover:bg-slate-800 hover:text-white p-2.5 rounded-lg transition text-sm font-bold border border-transparent hover:border-slate-700 shadow-sm"
-            >
+            <button onClick={() => router.push('/onboarding?switch=true')} className="w-full flex items-center justify-center gap-2 text-indigo-300 hover:bg-indigo-800 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-transparent hover:border-indigo-700 shadow-sm">
                 <i className="fas fa-exchange-alt"></i> Switch Role
             </button>
-
-            {/* Custom Log Out Button */}
-            <button 
-              onClick={() => signOut({ redirectUrl: '/' })}
-              className="w-full flex items-center justify-center gap-2 text-rose-400 hover:bg-rose-600 hover:text-white p-2.5 rounded-lg transition text-sm font-bold border border-rose-900/50 hover:border-rose-500 bg-rose-950/20 shadow-sm"
-            >
+            <button onClick={() => signOut({ redirectUrl: '/' })} className="w-full flex items-center justify-center gap-2 text-rose-400 hover:bg-rose-600 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-rose-900/50 hover:border-rose-500 bg-rose-950/20 shadow-sm">
                 <i className="fas fa-sign-out-alt"></i> Log Out
             </button>
         </div>
       </aside>
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 flex flex-col overflow-y-auto">
-        <header className="bg-white shadow-sm p-6 flex justify-between items-center z-10 sticky top-0">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Live Rooms & Analytics</h1>
-            <p className="text-sm text-slate-500 mt-1">Manage your active exams and view student performance.</p>
+      <main className="flex-1 flex flex-col overflow-y-auto w-full">
+        
+        {/* --- UPGRADED HEADER WITH HIGHLIGHTED BACK BUTTON --- */}
+        <header className="bg-white border-b border-slate-200 h-auto md:h-16 py-3 px-4 md:px-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-0 z-20 shrink-0 shadow-sm sticky top-0">
+          <div className="flex items-center gap-3 w-full md:w-auto">
+             <button className="md:hidden text-slate-600 shrink-0" onClick={() => setIsMobileMenuOpen(true)}><i className="fas fa-bars text-xl"></i></button>
+             
+             {/* HIGH-VISIBILITY BACK BUTTON */}
+             <button onClick={() => router.push('/educator/dashboard')} className="shrink-0 bg-indigo-50 border border-indigo-100 text-indigo-600 hover:text-white hover:bg-indigo-600 hover:shadow-md transition-all flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold" title="Back to Dashboard">
+               <i className="fas fa-arrow-left"></i> <span className="hidden sm:block">Dashboard</span>
+             </button>
+             
+             <h1 className="text-xl md:text-2xl font-black text-slate-900 ml-2">Live Rooms</h1>
           </div>
+          
           <button 
             onClick={() => router.push('/educator/create-mock')}
-            className="bg-emerald-600 text-white px-5 py-2.5 rounded-lg font-bold shadow-sm hover:bg-emerald-700 transition flex items-center gap-2"
+            className="w-full md:w-auto bg-emerald-600 text-white px-5 py-2 md:py-2.5 rounded-lg text-sm font-bold shadow-sm hover:bg-emerald-700 hover:shadow-md transition-all flex items-center justify-center gap-2 hover:-translate-y-0.5"
           >
             <i className="fas fa-plus"></i> Create New Mock
           </button>
         </header>
 
-        <div className="p-6 md:p-8 max-w-6xl mx-auto w-full">
+        <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full">
           
           {myRooms.length === 0 ? (
-            <div className="bg-white p-12 rounded-3xl border border-slate-200 text-center shadow-sm">
-              <div className="w-24 h-24 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">
-                <i className="fas fa-folder-open"></i>
-              </div>
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">No Rooms Created Yet</h2>
-              <p className="text-slate-500 mb-8">Extract a PDF to create your first live mock exam.</p>
-              <button 
-                onClick={() => router.push('/educator/create-mock')}
-                className="bg-slate-800 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-700 transition"
-              >
-                Go to Studio
-              </button>
+            <div className="mt-10 flex flex-col items-center justify-center animate-in fade-in zoom-in duration-500 px-4 text-center">
+               <div className="w-24 h-24 bg-indigo-50 text-indigo-300 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-inner border border-indigo-100/50 transform -rotate-3"><i className="fas fa-door-open"></i></div>
+               <h2 className="text-2xl md:text-3xl font-black text-slate-800 mb-3 tracking-tight">No Rooms Created Yet</h2>
+               <p className="text-sm font-medium text-slate-500 max-w-md mb-8 leading-relaxed">Head over to the Exam Studio to extract a PDF with AI or build your first custom mock exam.</p>
+               
+               <button onClick={() => router.push('/educator/create-mock')} className="bg-indigo-600 text-white px-8 py-3.5 rounded-xl font-black hover:bg-indigo-700 hover:-translate-y-1 transition-all text-sm md:text-base shadow-lg shadow-indigo-600/30 flex items-center gap-2 w-full sm:w-auto justify-center">
+                 Go to Exam Studio <i className="fas fa-arrow-right ml-1"></i>
+               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 lg:gap-6">
               {myRooms.map((room) => (
-                <div key={room.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg hover:border-emerald-400 transition-all flex flex-col overflow-hidden group">
+                <div key={room.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg hover:border-indigo-300 hover:-translate-y-1 transition-all flex flex-col overflow-hidden group">
                   
-                  {/* Card Header */}
-                  <div className="p-6 border-b border-slate-100 flex-1">
-                    <div className="flex justify-between items-start mb-4">
-                      <span className={`text-[10px] uppercase tracking-wider font-bold px-3 py-1.5 rounded-md ${room.visibility === 'public' ? 'bg-blue-50 text-blue-600 border border-blue-100' : 'bg-purple-50 text-purple-600 border border-purple-100'}`}>
-                        {room.visibility === 'public' ? <><i className="fas fa-globe mr-1"></i> Public</> : <><i className="fas fa-lock mr-1"></i> Private</>}
+                  {/* Card Header & Content */}
+                  <div className="p-5 md:p-6 flex-1 flex flex-col relative">
+                    
+                    {/* Delete Button (Absolute top right, shows on hover) */}
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleDeleteClick(room.id, room.title); }}
+                      className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-slate-300 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 rounded-lg transition-all opacity-100 md:opacity-0 group-hover:opacity-100 shadow-sm"
+                      title="Delete Exam"
+                    >
+                      <i className="fas fa-trash-alt text-sm"></i>
+                    </button>
+
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className={`text-[9px] uppercase tracking-widest font-black px-2.5 py-1 rounded-md shadow-sm ${room.visibility === 'public' ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'bg-purple-50 text-purple-600 border border-purple-200'}`}>
+                        {room.visibility === 'public' ? <><i className="fas fa-globe-americas mr-1"></i> Public</> : <><i className="fas fa-lock mr-1"></i> Private</>}
                       </span>
-                      
-                      {/* Date & Delete Button Area */}
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-slate-400 font-bold bg-slate-50 px-2 py-1 rounded">
-                          {room.createdAtDate.toLocaleDateString()}
-                        </span>
-                        <button 
-                          onClick={() => handleDeleteClick(room.id, room.title)}
-                          className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white hover:bg-rose-500 rounded-md transition opacity-0 group-hover:opacity-100"
-                          title="Delete Mock"
-                        >
-                          <i className="fas fa-trash-alt text-xs"></i>
-                        </button>
-                      </div>
+                      <span className="text-[10px] text-slate-500 font-bold bg-slate-100 px-2 py-1 rounded border border-slate-200">
+                        <i className="far fa-calendar-alt mr-1"></i> {room.createdAtDate.toLocaleDateString()}
+                      </span>
                     </div>
                     
-                    <h3 className="font-bold text-slate-800 text-xl leading-tight mb-3">{room.title}</h3>
+                    <h3 className="font-black text-slate-900 text-lg md:text-xl leading-tight mb-4 pr-8 line-clamp-2">{room.title}</h3>
                     
-                    <div className="flex items-center gap-5 text-xs text-slate-500 font-bold mt-5 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                      <div className="flex items-center gap-1.5"><i className="fas fa-clock text-slate-400"></i> {room.duration} mins</div>
-                      <div className="flex items-center gap-1.5"><i className="fas fa-calendar-alt text-slate-400"></i> {room.availability === 'permanent' ? 'Always Open' : room.availability}</div>
+                    <div className="mt-auto flex flex-wrap items-center gap-2 text-xs text-slate-600 font-bold bg-slate-50 p-3 rounded-xl border border-slate-100">
+                      <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm"><i className="fas fa-layer-group text-indigo-500"></i> {room.examCategory}</div>
+                      <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm"><i className="fas fa-clock text-amber-500"></i> {room.duration}m</div>
+                      <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm truncate max-w-full"><i className="fas fa-eye text-emerald-500"></i> {room.availability === 'permanent' ? 'Always' : room.availability}</div>
                     </div>
                   </div>
 
                   {/* Room ID Bar (For Private Rooms) */}
                   {room.visibility === 'private' && (
-                    <div className="bg-slate-900 text-white px-6 py-3.5 border-b border-slate-800 flex justify-between items-center">
-                      <div>
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest block mb-0.5">Room ID</span>
-                        <span className="font-mono text-base font-bold tracking-wider">{room.id}</span>
+                    <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white px-5 py-4 border-t border-slate-800 flex justify-between items-center relative overflow-hidden">
+                      <div className="absolute -right-4 -top-4 w-16 h-16 bg-indigo-500/20 rounded-full blur-xl pointer-events-none"></div>
+                      <div className="relative z-10">
+                        <span className="text-[9px] text-indigo-300 font-black uppercase tracking-widest block mb-0.5">Room ID</span>
+                        <span className="font-mono text-lg md:text-xl font-black tracking-wider text-white">{room.id}</span>
                       </div>
                       <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleCopyCode(room.id);
-                        }}
-                        className="text-slate-300 hover:text-emerald-400 bg-slate-800 hover:bg-slate-700 w-10 h-10 rounded-lg flex items-center justify-center transition"
+                        onClick={(e) => { e.stopPropagation(); handleCopyCode(room.id); }}
+                        className="relative z-10 text-slate-300 hover:text-emerald-400 bg-white/10 hover:bg-white/20 border border-white/10 w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-sm hover:scale-105"
                         title="Copy Room ID"
                       >
                         <i className="fas fa-copy"></i>
@@ -282,12 +274,12 @@ export default function LiveRoomsHub() {
                   )}
 
                   {/* Card Footer Action */}
-                  <div className="p-4 bg-slate-50">
+                  <div className="p-3 bg-slate-100 border-t border-slate-200">
                     <button 
                       onClick={() => router.push(`/educator/live-rooms/${room.id}`)}
-                      className="w-full bg-white border border-slate-200 text-emerald-600 py-3 rounded-xl text-sm font-bold hover:bg-emerald-50 hover:border-emerald-200 transition shadow-sm"
+                      className="w-full bg-white border border-slate-300 text-indigo-700 py-3 rounded-xl text-sm font-black hover:bg-indigo-50 hover:border-indigo-300 transition-colors shadow-sm flex items-center justify-center gap-2 group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600"
                     >
-                      View Leaderboard & Analytics <i className="fas fa-arrow-right ml-1 text-xs"></i>
+                      <i className="fas fa-chart-line"></i> View Leaderboard
                     </button>
                   </div>
 

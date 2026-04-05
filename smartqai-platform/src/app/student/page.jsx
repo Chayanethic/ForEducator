@@ -7,6 +7,10 @@ import Link from "next/link";
 import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, limit, startAfter } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
+// --- MATH RENDERING IMPORTS ---
+import 'katex/dist/katex.min.css';
+import Latex from 'react-latex-next';
+
 // --- PRODUCT TOUR INTEGRATION ---
 import ProductTour from "@/components/ProductTour";
 
@@ -40,7 +44,7 @@ export default function StudentDashboard() {
 
   const showToast = (message, type = "success") => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 4000);
   };
 
   // --- ACTIVE ROADMAP & CALENDAR STATE ---
@@ -73,7 +77,7 @@ export default function StudentDashboard() {
         const progressSnap = await getDocs(qProgress);
         setActiveProgress(progressSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
-        // 2. Fetch Recent Completed Exams (PAGINATED - FIRST 5 ONLY)
+        // 2. Fetch Recent Completed Exams (PAGINATED)
         const resultsRef = collection(db, "results");
         const qResults = query(
           resultsRef, 
@@ -88,7 +92,7 @@ export default function StudentDashboard() {
         }));
         
         setPastResults(fetchedResults);
-        setLastVisibleDoc(resultsSnap.docs[resultsSnap.docs.length - 1]); // Save cursor
+        setLastVisibleDoc(resultsSnap.docs[resultsSnap.docs.length - 1]); 
         if (resultsSnap.docs.length < 5) setHasMoreResults(false);
 
         // 3. Fetch Active Roadmap
@@ -107,7 +111,6 @@ export default function StudentDashboard() {
     if (isLoaded && isSignedIn) fetchPersonalData();
   }, [user, isLoaded, isSignedIn]);
 
-  // --- FETCH NEXT 5 EXAMS ---
   const loadMoreExams = async () => {
     if (!lastVisibleDoc) return;
     setIsLoadingMore(true);
@@ -173,7 +176,6 @@ export default function StudentDashboard() {
 
   const toggleRoadmapDay = async (dayNumber, isToday) => {
     if (!activeRoadmap || !activeRoadmap.plan) return;
-    
     if (!isToday) {
       showToast("You can only check off today's goal!", "error");
       return;
@@ -206,7 +208,6 @@ export default function StudentDashboard() {
     }
   };
 
-  // --- DELETE ROADMAP (Preserves Streak) ---
   const requestDeleteRoadmap = () => {
     setConfirmDialog({
       title: "End Study Plan?",
@@ -244,6 +245,7 @@ export default function StudentDashboard() {
     router.push(path);
   };
 
+  // --- REPORT & DIAGNOSTIC LOGIC ---
   const openReportModal = async (result) => {
     setIsFetchingReport(true);
     setSelectedResult(result);
@@ -278,15 +280,18 @@ export default function StudentDashboard() {
         if (studentAnsRaw === undefined) studentAnsRaw = Object.values(selectedResult.answers)[idx];
       }
     }
+    
     let extractedAnswer = "";
     if (studentAnsRaw !== null && studentAnsRaw !== undefined) {
        if (typeof studentAnsRaw === 'string' || typeof studentAnsRaw === 'number') extractedAnswer = String(studentAnsRaw);
        else if (Array.isArray(studentAnsRaw)) extractedAnswer = studentAnsRaw;
        else if (typeof studentAnsRaw === 'object') extractedAnswer = studentAnsRaw.userAnswer ?? studentAnsRaw.selectedOption ?? studentAnsRaw.answer ?? studentAnsRaw.studentAnswer ?? "";
     }
+    
     const isUnattempted = extractedAnswer === null || extractedAnswer === undefined || extractedAnswer === "" || (Array.isArray(extractedAnswer) && extractedAnswer.length === 0);
     const correctAnsRaw = q.correctAnswer ?? q.correctOption ?? "";
     let isCorrect = false;
+    
     if (studentAnsRaw && typeof studentAnsRaw.isCorrect === 'boolean') {
       isCorrect = studentAnsRaw.isCorrect;
     } else if (!isUnattempted) {
@@ -294,13 +299,21 @@ export default function StudentDashboard() {
       const safeCorrect = Array.isArray(correctAnsRaw) ? correctAnsRaw.map(String).sort() : [String(correctAnsRaw).trim()];
       isCorrect = JSON.stringify(safeUser) === JSON.stringify(safeCorrect);
     }
+    
     return {
-      question: q, userAnswer: extractedAnswer, isCorrect: isCorrect, isUnattempted: isUnattempted,
-      correctAnswer: correctAnsRaw, explanation: q.explanation || "", explanationImage: q.explanationImage || null
+      question: q, 
+      userAnswer: extractedAnswer, 
+      isCorrect: isCorrect, 
+      isUnattempted: isUnattempted,
+      correctAnswer: correctAnsRaw, 
+      explanation: q.explanation || "", 
+      explanationImage: q.explanationImage || null
     };
   }) : activeAnswersList.map(ans => ({
-      question: ans.question || ans, userAnswer: ans.userAnswer || ans.selectedOption || ans.answer || "",
-      isCorrect: ans.isCorrect, isUnattempted: !ans.userAnswer || ans.userAnswer.length === 0,
+      question: ans.question || ans, 
+      userAnswer: ans.userAnswer || ans.selectedOption || ans.answer || "",
+      isCorrect: ans.isCorrect, 
+      isUnattempted: !ans.userAnswer || ans.userAnswer.length === 0,
       correctAnswer: (ans.question && ans.question.correctAnswer) || ans.correctAnswer || "N/A",
       explanation: (ans.question && ans.question.explanation) || ans.explanation || "",
       explanationImage: (ans.question && ans.question.explanationImage) || ans.explanationImage || null
@@ -310,14 +323,33 @@ export default function StudentDashboard() {
     if (!selectedResult || fullExamReview.length === 0) return;
     setIsAnalyzing(true);
     try {
+      const analysisPayload = {
+        examTitle: selectedResult.examTitle,
+        examCategory: selectedResult.examCategory,
+        totalScore: selectedResult.score,
+        accuracy: Math.round((selectedResult.correct / ((selectedResult.correct || 0) + (selectedResult.incorrect || 0))) * 100) || 0,
+        detailedAnswers: fullExamReview.map(item => ({
+            questionText: item.question?.text || "Unknown",
+            studentAnswer: item.userAnswer,
+            correctAnswer: item.correctAnswer,
+            status: item.isCorrect ? "Correct" : item.isUnattempted ? "Skipped" : "Incorrect"
+        }))
+      };
+
       const response = await fetch("/api/analyze-result", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers: fullExamReview, examTitle: selectedResult.examTitle, examCategory: selectedResult.examCategory })
+        method: "POST", 
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(analysisPayload)
       });
+      
       if (!response.ok) throw new Error("Failed to fetch diagnostics.");
       const data = await response.json();
-      if (Array.isArray(data.diagnostics)) setDiagnosticReport(data.diagnostics);
-      else throw new Error("Invalid AI Format");
+      
+      if (data.diagnostics && data.diagnostics.topics) {
+        setDiagnosticReport(data.diagnostics);
+      } else {
+        throw new Error("Invalid AI Format");
+      }
     } catch (error) {
       showToast("AI server busy. Try again.", "error");
     } finally {
@@ -331,7 +363,6 @@ export default function StudentDashboard() {
   pastResults.forEach(r => { totalCorrect += (r.correct || 0); totalAttempted += (r.correct || 0) + (r.incorrect || 0); });
   const accuracy = totalAttempted > 0 ? Math.round((totalCorrect / totalAttempted) * 100) : 0;
 
-  // Calculate current day for roadmap
   let currentRoadmapDayIndex = -1;
   if (activeRoadmap?.plan && activeRoadmap?.startDate) {
     const start = new Date(activeRoadmap.startDate.toDate ? activeRoadmap.startDate.toDate() : activeRoadmap.startDate);
@@ -344,7 +375,7 @@ export default function StudentDashboard() {
   }
   const todaysPlan = currentRoadmapDayIndex >= 0 ? activeRoadmap?.plan?.[currentRoadmapDayIndex] : null;
 
-  // --- BRAND NEW OZONE LOADING SCREEN ---
+  // --- BRANDED LOADING SCREEN ---
   if (!isLoaded || isLoadingMain) return (
     <div className="flex h-screen items-center justify-center bg-slate-50 flex-col animate-in fade-in duration-500">
       <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-indigo-700 text-indigo-50 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-xl shadow-indigo-900/30 border border-indigo-400/30 transform -rotate-3 animate-pulse">
@@ -362,23 +393,28 @@ export default function StudentDashboard() {
       {/* THE PRODUCT TOUR WITH USER ID */}
       <ProductTour userId={user?.id} />
 
-      {/* GLOBAL TOAST NOTIFICATION */}
+      {/* --- PREMIUM GLASSMORPHISM TOAST --- */}
       {toast && (
-        <div className={`fixed bottom-6 right-6 px-5 py-3 rounded-xl shadow-2xl z-[200] flex items-center gap-3 animate-in slide-in-from-bottom-5 text-sm font-bold text-white ${toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'}`}>
-          <i className={`fas ${toast.type === 'error' ? 'fa-exclamation-circle' : 'fa-check-circle'}`}></i>
-          {toast.message}
+        <div className={`fixed bottom-6 right-6 px-6 py-4 rounded-2xl shadow-2xl z-[9999] flex items-center gap-4 animate-in slide-in-from-bottom-5 backdrop-blur-xl border border-white/20 
+          ${toast.type === 'success' ? 'bg-emerald-600/90 text-white' : 'bg-rose-600/90 text-white'}`}>
+          <div className="bg-white/20 w-8 h-8 rounded-full flex items-center justify-center shrink-0">
+             <i className={`fas ${toast.type === 'success' ? 'fa-check' : 'fa-exclamation'} text-sm`}></i>
+          </div>
+          <span className="font-bold text-sm tracking-wide">{toast.message}</span>
         </div>
       )}
 
-      {/* CONFIRMATION MODAL */}
+      {/* --- PREMIUM DELETE CONFIRMATION MODAL --- */}
       {confirmDialog && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95">
-              <h3 className="text-lg font-black text-slate-800 mb-2">{confirmDialog.title}</h3>
-              <p className="text-xs font-medium text-slate-500 mb-6 leading-relaxed">{confirmDialog.message}</p>
-              <div className="flex gap-3 justify-end">
-                 <button onClick={() => setConfirmDialog(null)} className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg transition">Cancel</button>
-                 <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="px-4 py-2 text-xs font-bold text-white bg-rose-500 hover:bg-rose-600 rounded-lg transition shadow-md">Confirm</button>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
+           <div className="bg-white rounded-3xl p-8 max-w-sm w-[95%] shadow-2xl border border-slate-200 animate-in zoom-in-95 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-2 bg-rose-500"></div>
+              <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center text-3xl mb-4 mx-auto"><i className="fas fa-exclamation-triangle"></i></div>
+              <h3 className="text-xl font-black text-slate-800 mb-2 text-center">{confirmDialog.title}</h3>
+              <p className="text-sm font-medium text-slate-500 mb-8 text-center leading-relaxed">{confirmDialog.message}</p>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center w-full">
+                 <button onClick={() => setConfirmDialog(null)} className="px-6 py-3 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition w-full sm:w-1/2">Cancel</button>
+                 <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="px-6 py-3 text-sm font-bold text-white bg-rose-500 hover:bg-rose-600 rounded-xl transition shadow-md shadow-rose-500/20 w-full sm:w-1/2">Confirm</button>
               </div>
            </div>
         </div>
@@ -386,83 +422,173 @@ export default function StudentDashboard() {
 
       {/* LOADING OVERLAY */}
       {isFetchingReport && (
-        <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center">
-           <i className="fas fa-spinner fa-spin text-3xl text-white"></i>
+        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex flex-col items-center justify-center">
+           <div className="relative w-20 h-20 mb-4">
+             <div className="absolute inset-0 border-4 border-slate-200/20 rounded-full"></div>
+             <div className="absolute inset-0 border-4 border-indigo-500 rounded-full border-t-transparent animate-spin"></div>
+             <i className="fas fa-file-alt absolute inset-0 flex items-center justify-center text-2xl text-indigo-400"></i>
+           </div>
+           <h2 className="text-white font-bold tracking-widest uppercase text-sm">Compiling Report...</h2>
         </div>
       )}
 
-      {/* FULLY INTACT STUDENT DEEP-DIVE MODAL */}
+      {/* --- FULLY UPGRADED DEEP-DIVE REPORT MODAL --- */}
       {selectedResult && !isFetchingReport && (
-        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex justify-center p-4 md:p-6 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl my-auto overflow-hidden flex flex-col max-h-[90vh] border border-slate-300">
-            <div className="bg-slate-900 p-5 flex justify-between items-center shrink-0">
-              <div className="flex items-center gap-3 text-white">
-                <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-lg shadow-md"><i className="fas fa-file-alt"></i></div>
+        <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 md:p-6 animate-in fade-in duration-300">
+          <div className="bg-slate-50 rounded-[2rem] shadow-2xl w-full max-w-6xl overflow-hidden flex flex-col h-full max-h-[95vh] border border-slate-700 animate-in zoom-in-95">
+            
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 flex justify-between items-center shrink-0 border-b border-slate-800">
+              <div className="flex items-center gap-4 text-white">
+                <div className="w-12 h-12 bg-indigo-500/20 rounded-xl flex items-center justify-center text-2xl border border-indigo-400/30 text-indigo-300"><i className="fas fa-chart-line"></i></div>
                 <div>
-                  <h2 className="text-base font-black">{selectedResult.examTitle} - Report</h2>
-                  <p className="text-xs font-medium text-slate-400">Submitted {selectedResult.submittedDate?.toLocaleDateString()}</p>
+                  <h2 className="text-xl md:text-2xl font-black tracking-tight">{selectedResult.examTitle}</h2>
+                  <p className="text-xs font-bold text-indigo-200/70 mt-1">Submitted {selectedResult.submittedDate?.toLocaleDateString()} at {selectedResult.submittedDate?.toLocaleTimeString()}</p>
                 </div>
               </div>
-              <button onClick={() => { setSelectedResult(null); setDiagnosticReport(null); setModalQuestions([]); }} className="w-8 h-8 bg-white/10 hover:bg-rose-500 text-white rounded-full transition flex items-center justify-center shadow-sm"><i className="fas fa-times"></i></button>
+              <button onClick={() => { setSelectedResult(null); setDiagnosticReport(null); setModalQuestions([]); }} className="w-10 h-10 bg-white/5 hover:bg-rose-500 text-slate-300 hover:text-white rounded-xl transition-all flex items-center justify-center shadow-sm border border-white/10 hover:border-rose-500"><i className="fas fa-times text-lg"></i></button>
             </div>
-            <div className="bg-slate-100 p-4 flex flex-col md:flex-row justify-between items-center gap-4 border-b border-slate-200 shrink-0">
-              <div className="flex gap-2 bg-slate-200 p-1 rounded-lg">
-                 <button onClick={() => setActiveModalTab('solutions')} className={`px-4 py-1.5 rounded-md font-bold text-xs transition ${activeModalTab === 'solutions' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>Solutions</button>
-                 <button onClick={() => setActiveModalTab('diagnostics')} className={`px-4 py-1.5 rounded-md font-bold text-xs transition ${activeModalTab === 'diagnostics' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>Diagnostics</button>
+
+            {/* Quick Stats Bar & Tabs */}
+            <div className="bg-white p-4 md:p-6 flex flex-col md:flex-row justify-between items-center gap-4 border-b border-slate-200 shrink-0 shadow-sm z-10 relative">
+              
+              {/* Custom Tabs */}
+              <div className="flex gap-2 bg-slate-100 p-1.5 rounded-xl w-full md:w-auto border border-slate-200">
+                 <button onClick={() => setActiveModalTab('solutions')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg font-black text-xs uppercase tracking-widest transition-all ${activeModalTab === 'solutions' ? 'bg-white text-indigo-700 shadow-md border border-slate-200/50' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'}`}>
+                   <i className="fas fa-list-check mr-2"></i>Solutions
+                 </button>
+                 <button onClick={() => setActiveModalTab('diagnostics')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg font-black text-xs uppercase tracking-widest transition-all ${activeModalTab === 'diagnostics' ? 'bg-white text-indigo-700 shadow-md border border-slate-200/50' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'}`}>
+                   <i className="fas fa-brain mr-2"></i>AI Analysis
+                 </button>
               </div>
-              <div className="flex flex-wrap gap-3">
-                 <div className="bg-white px-4 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2"><span className="text-slate-500 text-[9px] uppercase font-black tracking-widest">Score</span><span className="text-base font-black text-indigo-700">{selectedResult.score}</span></div>
-                 <div className="bg-white px-4 py-1.5 rounded-lg border border-emerald-100 shadow-sm flex items-center gap-2"><span className="text-emerald-600 text-[9px] uppercase font-black tracking-widest">Accuracy</span><span className="text-base font-black text-emerald-700">{Math.round((selectedResult.correct / ((selectedResult.correct || 0) + (selectedResult.incorrect || 0))) * 100) || 0}%</span></div>
+              
+              {/* Score Badges */}
+              <div className="flex flex-wrap justify-center gap-3 w-full md:w-auto">
+                 <div className="bg-slate-50 px-5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-3">
+                   <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center"><i className="fas fa-bullseye"></i></div>
+                   <div>
+                     <span className="block text-[9px] uppercase font-black text-slate-400 tracking-widest">Total Score</span>
+                     <span className="block text-lg font-black text-indigo-700 leading-none">{selectedResult.score}</span>
+                   </div>
+                 </div>
+                 <div className="bg-emerald-50 px-5 py-2.5 rounded-xl border border-emerald-100 flex items-center gap-3">
+                   <div className="w-8 h-8 rounded-full bg-emerald-200/50 text-emerald-600 flex items-center justify-center"><i className="fas fa-percentage"></i></div>
+                   <div>
+                     <span className="block text-[9px] uppercase font-black text-emerald-600/70 tracking-widest">Accuracy</span>
+                     <span className="block text-lg font-black text-emerald-700 leading-none">{Math.round((selectedResult.correct / ((selectedResult.correct || 0) + (selectedResult.incorrect || 0))) * 100) || 0}%</span>
+                   </div>
+                 </div>
               </div>
             </div>
 
-            <div className="p-5 overflow-y-auto flex-1 bg-slate-50">
+            {/* Modal Body Area */}
+            <div className="p-6 md:p-8 overflow-y-auto flex-1 bg-slate-50/50 scroll-smooth">
+              
+              {/* --- TAB 1: SOLUTIONS --- */}
               {activeModalTab === 'solutions' && (
-                <div className="space-y-4 animate-in fade-in max-w-4xl mx-auto">
-                  {fullExamReview.length === 0 ? <div className="text-center p-10 font-bold text-sm text-slate-500">Failed to load detailed question data.</div> : fullExamReview.map((item, idx) => {
+                <div className="space-y-6 animate-in fade-in max-w-4xl mx-auto pb-10">
+                  {fullExamReview.length === 0 ? (
+                    <div className="text-center p-12 bg-white rounded-2xl border border-slate-200 shadow-sm">
+                      <i className="fas fa-ghost text-4xl text-slate-300 mb-3"></i>
+                      <p className="font-bold text-sm text-slate-500">Failed to load detailed question data.</p>
+                    </div>
+                  ) : fullExamReview.map((item, idx) => {
                     const isCorrect = item.isCorrect;
                     const isUnattempted = item.isUnattempted;
+                    
+                    // Determine border/header colors based on result
+                    const cardTheme = isCorrect 
+                        ? 'border-emerald-200 shadow-emerald-900/5' 
+                        : isUnattempted ? 'border-slate-300 shadow-slate-900/5' : 'border-rose-200 shadow-rose-900/5';
+
                     return (
-                      <div key={idx} className={`bg-white border-2 rounded-xl p-5 shadow-sm ${isCorrect ? 'border-emerald-200' : isUnattempted ? 'border-slate-200' : 'border-rose-300'}`}>
-                        <div className="flex items-center justify-between mb-3 pb-3 border-b border-slate-100">
-                          <div className="flex items-center gap-2">
-                            <span className="bg-slate-800 text-white text-[10px] font-black px-2 py-1 rounded">Q{idx + 1}</span>
-                            {isCorrect ? <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider"><i className="fas fa-check mr-1"></i> Correct</span> : isUnattempted ? <span className="bg-slate-100 text-slate-600 text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider"><i className="fas fa-minus mr-1"></i> Unattempted</span> : <span className="bg-rose-100 text-rose-800 text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider"><i className="fas fa-times mr-1"></i> Incorrect</span>}
-                          </div>
-                          <div className="text-xs font-black text-slate-400">{isCorrect ? `+${item.question?.marks || 2}` : isUnattempted ? `0` : `-${item.question?.negativeMarks || 0.66}`} Marks</div>
-                        </div>
-                        <p className="text-slate-800 font-bold mb-4 text-sm whitespace-pre-wrap">{item.question?.text || "Missing text"}</p>
+                      <div key={idx} className={`bg-white border-2 rounded-2xl p-6 shadow-sm transition-all hover:shadow-md ${cardTheme}`}>
                         
+                        {/* Question Header */}
+                        <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
+                          <div className="flex items-center gap-3">
+                            <span className="bg-slate-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black shadow-sm">Q{idx + 1}</span>
+                            {isCorrect ? <span className="bg-emerald-100 text-emerald-700 text-[10px] font-black px-3 py-1 rounded-md uppercase tracking-wider border border-emerald-200"><i className="fas fa-check mr-1.5"></i> Correct</span> : 
+                             isUnattempted ? <span className="bg-slate-100 text-slate-600 text-[10px] font-black px-3 py-1 rounded-md uppercase tracking-wider border border-slate-200"><i className="fas fa-minus mr-1.5"></i> Skipped</span> : 
+                             <span className="bg-rose-100 text-rose-700 text-[10px] font-black px-3 py-1 rounded-md uppercase tracking-wider border border-rose-200"><i className="fas fa-times mr-1.5"></i> Incorrect</span>}
+                          </div>
+                          <div className="text-xs font-black text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
+                            {isCorrect ? <span className="text-emerald-600">+{item.question?.marks || 2} Marks</span> : 
+                             isUnattempted ? <span>0 Marks</span> : 
+                             <span className="text-rose-600">-{item.question?.negativeMarks || 0.66} Marks</span>}
+                          </div>
+                        </div>
+
+                        {/* Question Content */}
+                        <div className="text-slate-800 font-bold mb-6 text-sm md:text-base leading-relaxed overflow-x-auto">
+                          <Latex>{item.question?.text || "Missing question text"}</Latex>
+                        </div>
+                        {item.question?.imageUrl && (
+                          <div className="mb-6 p-2 bg-slate-50 rounded-xl border border-slate-200 inline-block">
+                            <img src={item.question.imageUrl} alt="Question Diagram" className="max-h-48 rounded object-contain" />
+                          </div>
+                        )}
+                        
+                        {/* Answers Comparison */}
                         {item.question?.type === 'NAT' ? (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200"><div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Your Answer</div><div className={`text-sm font-black ${isUnattempted ? 'text-slate-400' : isCorrect ? 'text-emerald-600' : 'text-rose-600'}`}>{isUnattempted ? "Not Answered" : Array.isArray(item.userAnswer) ? item.userAnswer.join(", ") : String(item.userAnswer)}</div></div>
-                              <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200 shadow-sm"><div className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">Correct Answer</div><div className="text-sm font-black text-emerald-700">{Array.isArray(item.correctAnswer) ? item.correctAnswer.join(", ") : String(item.correctAnswer)}</div></div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-2">
+                              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-inner">
+                                <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 flex items-center gap-1.5"><i className="fas fa-user-edit"></i> Your Answer</div>
+                                <div className={`text-base font-black ${isUnattempted ? 'text-slate-400' : isCorrect ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                  {isUnattempted ? "--" : Array.isArray(item.userAnswer) ? item.userAnswer.join(", ") : String(item.userAnswer)}
+                                </div>
+                              </div>
+                              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 shadow-sm">
+                                <div className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1.5 flex items-center gap-1.5"><i className="fas fa-check-double"></i> Correct Answer</div>
+                                <div className="text-base font-black text-emerald-700">
+                                  {Array.isArray(item.correctAnswer) ? item.correctAnswer.join(", ") : String(item.correctAnswer)}
+                                </div>
+                              </div>
                             </div>
                         ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
                             {(item.question?.options || []).map((opt, optIndex) => {
                                const correctArr = Array.isArray(item.correctAnswer) ? item.correctAnswer.map(String) : [String(item.correctAnswer)];
                                const userArr = Array.isArray(item.userAnswer) ? item.userAnswer.map(String) : [String(item.userAnswer)];
                                const isCorrectOption = correctArr.includes(String(opt.id));
                                const isUserSelected = userArr.includes(String(opt.id));
-                               let borderClass = "border-slate-200 bg-slate-50"; let icon = null;
-                               if (isCorrectOption) { borderClass = "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-200 shadow-sm"; icon = <i className="fas fa-check-circle text-emerald-500 text-lg"></i>; } 
-                               else if (isUserSelected && !isCorrectOption) { borderClass = "border-rose-500 bg-rose-50 ring-1 ring-rose-200 shadow-sm"; icon = <i className="fas fa-times-circle text-rose-500 text-lg"></i>; }
+                               
+                               let borderClass = "border-slate-200 bg-slate-50 opacity-60"; 
+                               let icon = null;
+
+                               if (isCorrectOption) { 
+                                 borderClass = "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200 shadow-sm opacity-100"; 
+                                 icon = <i className="fas fa-check-circle text-emerald-500 text-xl shrink-0"></i>; 
+                               } else if (isUserSelected && !isCorrectOption) { 
+                                 borderClass = "border-rose-500 bg-rose-50 ring-2 ring-rose-200 shadow-sm opacity-100"; 
+                                 icon = <i className="fas fa-times-circle text-rose-500 text-xl shrink-0"></i>; 
+                               } else if (isUserSelected && isCorrectOption) {
+                                 borderClass = "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200 shadow-sm opacity-100"; 
+                                 icon = <i className="fas fa-check-circle text-emerald-500 text-xl shrink-0"></i>; 
+                               }
+
                                return (
-                                 <div key={optIndex} className={`flex items-start gap-3 p-3 rounded-lg border transition ${borderClass}`}>
-                                   <div className={`w-6 h-6 rounded flex items-center justify-center text-xs font-black shrink-0 ${isCorrectOption ? 'bg-emerald-500 text-white' : isUserSelected ? 'bg-rose-500 text-white' : 'bg-slate-200 text-slate-700'}`}>{opt.id}</div>
-                                   <div className="flex-1"><div className={`text-xs font-bold ${isCorrectOption ? 'text-emerald-900' : isUserSelected ? 'text-rose-900' : 'text-slate-800'}`}>{opt.text}</div></div>
+                                 <div key={optIndex} className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${borderClass}`}>
+                                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-black shrink-0 ${isCorrectOption ? 'bg-emerald-500 text-white' : isUserSelected ? 'bg-rose-500 text-white' : 'bg-slate-200 text-slate-500'}`}>{opt.id}</div>
+                                   <div className="flex-1 overflow-x-auto">
+                                     <div className={`text-sm font-bold ${isCorrectOption ? 'text-emerald-900' : isUserSelected ? 'text-rose-900' : 'text-slate-600'}`}>
+                                       <Latex>{opt.text}</Latex>
+                                     </div>
+                                     {opt.imageUrl && <img src={opt.imageUrl} alt="Option" className="mt-2 max-h-20 rounded border border-slate-200 bg-white p-1" />}
+                                   </div>
                                    {icon}
                                  </div>
                                )
                             })}
                           </div>
                         )}
+
+                        {/* Official Solution Section */}
                         {(item.explanation || item.explanationImage) && (
-                          <div className="bg-indigo-50/50 p-4 rounded-lg border border-indigo-100 mt-4">
-                            <h4 className="text-[10px] font-black text-indigo-800 uppercase tracking-wider mb-1.5 flex items-center gap-1.5"><i className="fas fa-lightbulb text-amber-500"></i> Official Solution</h4>
-                            {item.explanation && <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap">{item.explanation}</p>}
-                            {item.explanationImage && <img src={item.explanationImage} alt="Solution Diagram" className="mt-3 max-h-48 rounded border border-indigo-200 bg-white p-1 object-contain" />}
+                          <div className="bg-indigo-50/70 p-5 rounded-xl border border-indigo-100 mt-6 shadow-inner">
+                            <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-3 flex items-center gap-2"><i className="fas fa-lightbulb text-amber-500 text-sm"></i> Official Solution Explanation</h4>
+                            {item.explanation && <div className="text-sm text-slate-800 font-medium whitespace-pre-wrap leading-relaxed overflow-x-auto"><Latex>{item.explanation}</Latex></div>}
+                            {item.explanationImage && <img src={item.explanationImage} alt="Solution Diagram" className="mt-4 max-h-48 rounded-lg border border-indigo-200 bg-white p-1.5 object-contain shadow-sm" />}
                           </div>
                         )}
                       </div>
@@ -470,25 +596,118 @@ export default function StudentDashboard() {
                   })}
                 </div>
               )}
+
+              {/* --- TAB 2: ADVANCED AI DIAGNOSTICS --- */}
               {activeModalTab === 'diagnostics' && (
-                <div className="animate-in fade-in max-w-4xl mx-auto">
-                  {!diagnosticReport && !isAnalyzing ? (
-                    <div className="bg-white p-10 rounded-2xl border border-slate-200 shadow-sm text-center">
-                      <div className="w-16 h-16 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center text-2xl mx-auto mb-4"><i className="fas fa-brain"></i></div>
-                      <h2 className="text-lg font-black text-slate-900 mb-2">Analyze Strongest & Weaknesses</h2>
-                      <button onClick={generateAIDiagnostics} className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-black hover:bg-indigo-700 transition shadow-md text-sm mt-3">Run AI Analysis <i className="fas fa-arrow-right ml-1"></i></button>
+                <div className="animate-in fade-in max-w-6xl mx-auto pb-10">
+                  
+                  {/* Generate Button State */}
+                  {!diagnosticReport && !isAnalyzing && (
+                    <div className="bg-white p-12 rounded-[2rem] border border-slate-200 shadow-sm text-center max-w-2xl mx-auto">
+                      <div className="w-24 h-24 bg-gradient-to-br from-indigo-50 to-purple-50 text-indigo-500 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-inner border border-indigo-100/50"><i className="fas fa-brain"></i></div>
+                      <h2 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Generate AI Performance Report</h2>
+                      <p className="text-slate-500 text-sm mb-8 max-w-md mx-auto font-medium leading-relaxed">Gemini will scan every question you answered, analyze your logic, and pinpoint your exact strengths and vulnerabilities to generate a personalized study plan.</p>
+                      <button onClick={generateAIDiagnostics} className="bg-indigo-600 text-white px-8 py-4 rounded-xl font-black hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 text-base flex items-center justify-center gap-3 mx-auto hover:-translate-y-1">
+                        <i className="fas fa-wand-magic-sparkles text-lg"></i> Run Deep Analysis
+                      </button>
                     </div>
-                  ) : isAnalyzing ? (
-                    <div className="bg-white p-12 rounded-2xl border border-slate-200 shadow-sm text-center"><i className="fas fa-cog fa-spin text-4xl text-indigo-600 mb-4"></i><h2 className="text-sm font-black text-slate-900">Scanning Responses...</h2></div>
-                  ) : (
-                    <div className="space-y-4">
-                      {diagnosticReport.map((item, i) => (
-                        <div key={i} className={`p-4 rounded-xl border ${item.color === 'rose' ? 'bg-rose-50/30 border-rose-100' : item.color === 'amber' ? 'bg-amber-50/30 border-amber-100' : 'bg-emerald-50/30 border-emerald-100'}`}>
-                          <div className="flex justify-between items-end mb-2"><h3 className="font-black text-slate-900 text-sm">{item.name}</h3><span className={`font-black text-lg ${item.color === 'rose' ? 'text-rose-600' : item.color === 'amber' ? 'text-amber-500' : 'text-emerald-600'}`}>{item.score}%</span></div>
-                          <div className="w-full bg-slate-200 h-1.5 rounded-full mb-3 overflow-hidden"><div className={`h-full rounded-full ${item.color === 'rose' ? 'bg-rose-500' : item.color === 'amber' ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${item.score}%` }}></div></div>
-                          <div className="text-[10px] font-bold text-slate-600">{item.weakness !== "None" ? `Review: ${item.weakness}` : "No immediate review needed."}</div>
+                  )}
+
+                  {/* Analyzing State */}
+                  {isAnalyzing && (
+                    <div className="bg-white p-16 rounded-[2rem] border border-slate-200 shadow-sm text-center max-w-2xl mx-auto">
+                      <div className="relative w-24 h-24 mx-auto mb-6">
+                         <div className="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
+                         <div className="absolute inset-0 border-4 border-indigo-500 rounded-full border-t-transparent animate-spin"></div>
+                         <i className="fas fa-cogs absolute inset-0 flex items-center justify-center text-3xl text-indigo-400"></i>
+                      </div>
+                      <h2 className="text-xl font-black text-slate-900 mb-2">Scanning Neural Pathways...</h2>
+                      <p className="text-sm font-bold text-slate-400">Cross-referencing mistakes and calculating topic mastery.</p>
+                    </div>
+                  )}
+
+                  {/* Results Grid State */}
+                  {diagnosticReport && !isAnalyzing && (
+                    <div>
+                      <div className="flex items-center gap-3 mb-6 px-2">
+                        <div className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center shadow-md"><i className="fas fa-chart-radar"></i></div>
+                        <div>
+                          <h2 className="text-xl font-black text-slate-900">Skill Matrix Breakdown</h2>
+                          <p className="text-xs font-bold text-slate-500">AI-identified strengths, gaps, and actionable next steps.</p>
                         </div>
-                      ))}
+                      </div>
+                      
+                      {/* OVERALL ASSESSMENT HERO CARD */}
+                      {diagnosticReport.overallAssessment && (
+                        <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-3xl p-8 shadow-lg text-white relative overflow-hidden mb-6">
+                          <div className="absolute -right-10 -top-10 w-48 h-48 bg-white/10 rounded-full blur-3xl pointer-events-none"></div>
+                          <h2 className="text-2xl font-black mb-3 flex items-center gap-3"><i className="fas fa-chart-line text-indigo-300"></i> Performance Summary</h2>
+                          <p className="text-indigo-100 text-base font-medium leading-relaxed max-w-3xl relative z-10">
+                            {diagnosticReport.overallAssessment}
+                          </p>
+                        </div>
+                      )}
+                      
+                      {/* ADVANCED DIAGNOSTIC GRID */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {(diagnosticReport.topics || diagnosticReport).map((item, i) => {
+                          const theme = {
+                            emerald: { bg: 'bg-emerald-50/50', border: 'border-emerald-200', text: 'text-emerald-700', bar: 'bg-emerald-500', icon: 'fa-check-circle', badgeBg: 'bg-emerald-100' },
+                            amber: { bg: 'bg-amber-50/50', border: 'border-amber-200', text: 'text-amber-700', bar: 'bg-amber-400', icon: 'fa-exclamation-circle', badgeBg: 'bg-amber-100' },
+                            rose: { bg: 'bg-rose-50/50', border: 'border-rose-200', text: 'text-rose-700', bar: 'bg-rose-500', icon: 'fa-exclamation-triangle', badgeBg: 'bg-rose-100' }
+                          }[item.color] || { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-700', bar: 'bg-slate-500', icon: 'fa-info-circle', badgeBg: 'bg-slate-200' };
+
+                          return (
+                            <div key={i} className={`p-6 rounded-3xl border-2 transition-all hover:shadow-lg bg-white ${theme.border} flex flex-col h-full`}>
+                              
+                              {/* Card Header & Progress Bar */}
+                              <div className="mb-6">
+                                <div className="flex justify-between items-start mb-4">
+                                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg shadow-sm ${theme.badgeBg} ${theme.text} border ${theme.border}`}>
+                                    <i className={`fas ${theme.icon}`}></i>
+                                  </div>
+                                  <span className={`font-black text-3xl tracking-tight ${theme.text}`}>{item.score}%</span>
+                                </div>
+                                <h3 className="font-black text-slate-900 text-lg mb-4 leading-tight">{item.name}</h3>
+                                <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden shadow-inner">
+                                  <div className={`h-full rounded-full ${theme.bar}`} style={{ width: `${item.score}%` }}></div>
+                                </div>
+                              </div>
+                              
+                              {/* Insight Sections */}
+                              <div className="space-y-3 flex-1 flex flex-col">
+                                {/* Strength */}
+                                <div className="bg-emerald-50/50 p-3.5 rounded-xl border border-emerald-100/50 flex items-start gap-3">
+                                  <i className="fas fa-arrow-trend-up text-emerald-500 mt-0.5"></i>
+                                  <div>
+                                    <span className="text-[10px] font-black text-emerald-700/70 uppercase tracking-widest block mb-0.5">Mastered Concept</span>
+                                    <div className="text-xs font-bold text-slate-700 leading-relaxed"><div className="text-[10px] font-bold text-slate-500 mb-5 flex items-center gap-1.5"><div className="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center"></div>{item.strength || "Solid foundational knowledge demonstrated."}</div></div>
+                                  </div>
+                                </div>
+
+                                {/* Weakness */}
+                                <div className="bg-rose-50/50 p-3.5 rounded-xl border border-rose-100/50 flex items-start gap-3">
+                                  <i className="fas fa-link-slash text-rose-400 mt-0.5"></i>
+                                  <div>
+                                    <span className="text-[10px] font-black text-rose-700/70 uppercase tracking-widest block mb-0.5">Knowledge Gap</span>
+                                    <p className="text-xs font-bold text-slate-700 leading-relaxed">{item.weakness !== "None" ? item.weakness : "No critical gaps identified."}</p>
+                                  </div>
+                                </div>
+
+                                {/* Action Plan */}
+                                <div className="bg-indigo-50/50 p-3.5 rounded-xl border border-indigo-100/50 flex items-start gap-3 mt-auto">
+                                  <i className="fas fa-book-open text-indigo-500 mt-0.5"></i>
+                                  <div>
+                                    <span className="text-[10px] font-black text-indigo-700/70 uppercase tracking-widest block mb-0.5">Actionable Next Step</span>
+                                    <p className="text-xs font-bold text-slate-800 leading-relaxed">{item.recommendedAction || "Continue practicing mixed questions."}</p>
+                                  </div>
+                                </div>
+                              </div>
+
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -501,17 +720,18 @@ export default function StudentDashboard() {
       {/* MOBILE MENU OVERLAY */}
       {isMobileMenuOpen && ( <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)} /> )}
 
-      {/* UPGRADED OZONE SIDEBAR WITH TOUR IDS */}
+      {/* --- UNIFIED PREMIUM STUDENT SIDEBAR --- */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-indigo-950 text-white flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
         <div className="flex items-center justify-between p-5 border-b border-indigo-900">
-          <Link href="/onboarding?switch=true" className="text-xl font-black flex items-center gap-2 hover:text-indigo-400 transition cursor-pointer tracking-tight">
-              <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
+          <Link href="/onboarding?switch=true" className="text-xl font-black flex items-center gap-2 hover:text-emerald-400 transition cursor-pointer tracking-tight">
+            <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
           </Link>
           <button className="md:hidden text-indigo-300 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}><i className="fas fa-times text-lg"></i></button>
         </div>
+        
         <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
             <button onClick={() => navigateTo('/student')} className="w-full flex items-center text-left gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-emerald-400 shadow-inner">
-                <i className="fas fa-home w-4"></i> Dashboard
+                <i className="fas fa-home w-4 text-emerald-400"></i> Dashboard
             </button>
             <button id="tour-sidebar-pyq" onClick={() => navigateTo('/student/pyq')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
                 <i className="fas fa-book-open w-4"></i> PYQ Practice
@@ -519,14 +739,15 @@ export default function StudentDashboard() {
             <button id="tour-sidebar-planner" onClick={() => navigateTo('/student/planner')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
                 <i className="fas fa-calendar-check w-4"></i> Study Planner
             </button>
-            <button id="tour-sidebar-quiz" onClick={() => {router.push('/student/quiz-battle'); setIsMobileMenuOpen(false);}} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
+            <button id="tour-sidebar-quiz" onClick={() => navigateTo('/student/quiz-battle')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
                 <i className="fas fa-gamepad w-4 text-rose-400 group-hover:animate-bounce"></i> Quiz Battle
             </button>
         </nav>
+        
         <div className="p-3 border-t border-indigo-900 bg-indigo-900/30 space-y-1.5">
             <div className="flex items-center gap-2.5 p-2.5 bg-indigo-950/50 rounded-xl border border-indigo-800/50 shadow-inner">
-                <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=User"} alt="Avatar" className="w-7 h-7 rounded-full border border-indigo-700" />
-                <div className="text-xs font-bold truncate flex-1 text-indigo-100">{user?.fullName || "Account"}</div>
+                <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Student"} alt="Avatar" className="w-7 h-7 rounded-full border border-indigo-700" />
+                <div className="text-xs font-bold truncate flex-1 text-indigo-100">{user?.fullName || "Student"}</div>
             </div>
             <button onClick={() => router.push('/onboarding?switch=true')} className="w-full flex items-center justify-center gap-2 text-indigo-300 hover:bg-indigo-800 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-transparent hover:border-indigo-700 shadow-sm">
                 <i className="fas fa-exchange-alt"></i> Switch Role
@@ -537,10 +758,11 @@ export default function StudentDashboard() {
         </div>
       </aside>
 
+      {/* MAIN CONTENT AREA */}
       <main className="flex-1 flex flex-col overflow-y-auto w-full bg-slate-50">
         
-        <header className="bg-white shadow-sm p-4 md:p-5 flex justify-between items-center z-10 sticky top-0">
-          <div className="flex items-center gap-3">
+        <header className="bg-white shadow-sm p-4 md:p-5 flex justify-between items-center z-10 sticky top-0 border-b border-slate-200">
+          <div className="flex items-center gap-4">
             <button className="md:hidden text-slate-600 hover:text-indigo-600 transition" onClick={() => setIsMobileMenuOpen(true)}>
               <i className="fas fa-bars text-xl"></i>
             </button>
@@ -552,16 +774,20 @@ export default function StudentDashboard() {
 
           <div className="flex items-center gap-3">
              {activeRoadmap?.streak !== undefined && (
-               <div id="tour-streak" className="bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-2 hover:scale-105 transition-transform cursor-default">
-                 <i className="fas fa-fire text-rose-500 text-lg animate-pulse"></i>
-                 <div className="flex flex-col">
-                   <span className="text-[8px] font-black text-rose-400 uppercase tracking-widest leading-none">Overall Streak</span>
+               <div id="tour-streak" className="bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-xl shadow-sm flex items-center gap-2 hover:shadow-md transition-all cursor-default">
+                 <div className="w-8 h-8 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center text-lg shadow-inner"><i className="fas fa-fire animate-pulse"></i></div>
+                 <div className="flex flex-col hidden sm:flex">
+                   <span className="text-[8px] font-black text-rose-400 uppercase tracking-widest leading-none">Streak</span>
                    <span className="text-sm font-black text-rose-600 leading-tight">{activeRoadmap.streak} Days</span>
                  </div>
                </div>
              )}
-             <div className="text-[10px] md:text-xs font-bold text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg bg-slate-50 shadow-sm flex items-center">
-               <i className="fas fa-layer-group text-indigo-500 mr-1.5"></i> {totalExams} <span className="hidden sm:inline ml-1">Exams Taken</span>
+             <div className="text-[10px] md:text-xs font-bold text-slate-700 border border-slate-200 px-3 py-2 rounded-xl bg-white shadow-sm flex items-center gap-2">
+               <div className="w-6 h-6 bg-indigo-50 text-indigo-500 rounded-lg flex items-center justify-center"><i className="fas fa-layer-group"></i></div>
+               <div className="flex flex-col">
+                 <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none">Exams</span>
+                 <span className="text-sm font-black leading-tight">{totalExams}</span>
+               </div>
              </div>
           </div>
         </header>
@@ -574,18 +800,19 @@ export default function StudentDashboard() {
             <div className="lg:col-span-8 space-y-5 lg:space-y-6">
               
               {/* JOIN PRIVATE MOCK (BANNER) WITH HOVER & TOUR ID */}
-              <div id="tour-join-room" className="bg-gradient-to-r from-indigo-600 to-purple-600 p-5 md:p-6 rounded-2xl shadow-sm hover:shadow-md transition-all text-white relative overflow-hidden">
-                <div className="absolute -right-6 -top-10 opacity-10 pointer-events-none"><i className="fas fa-door-open text-9xl"></i></div>
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
-                  <div>
-                    <h2 className="text-lg font-black mb-1"><i className="fas fa-link text-indigo-300 mr-2"></i> Join a Private Mock</h2>
-                    <p className="text-indigo-100 text-xs font-medium max-w-sm">Enter the Room ID provided by your educator to join a scheduled exam.</p>
-                  </div>
-                  <form onSubmit={handleJoinRoom} className="flex gap-2 w-full md:w-auto">
-                    <input type="text" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="e.g. 8xV9-2mB" className="w-full md:w-48 bg-white/10 border border-white/20 rounded-lg p-2.5 text-white placeholder-indigo-200 outline-none focus:bg-white/20 transition font-mono text-xs font-bold shadow-inner" required />
-                    <button type="submit" disabled={isJoining} className="bg-white text-indigo-700 px-4 py-2.5 rounded-lg font-black hover:bg-indigo-50 transition shadow-sm disabled:opacity-70 flex items-center justify-center gap-1.5 text-xs shrink-0">{isJoining ? "..." : "Join"} <i className="fas fa-arrow-right"></i></button>
-                  </form>
+              <div id="tour-join-room" className="bg-gradient-to-br from-indigo-600 to-purple-700 p-6 rounded-3xl shadow-lg relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-6 group">
+                <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-white/10 rounded-full blur-3xl pointer-events-none group-hover:bg-white/20 transition-colors duration-700"></div>
+                <div className="relative z-10">
+                  <h2 className="text-xl md:text-2xl font-black text-white mb-1 tracking-tight flex items-center gap-2">
+                     <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center text-sm backdrop-blur-sm"><i className="fas fa-door-open"></i></div>
+                     Join a Private Room
+                  </h2>
+                  <p className="text-indigo-200 text-xs md:text-sm font-medium max-w-sm">Enter the secure Room ID provided by your educator to instantly access your scheduled live exam.</p>
                 </div>
+                <form onSubmit={handleJoinRoom} className="flex gap-2 w-full md:w-auto relative z-10">
+                  <input type="text" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="e.g. 8xV9-2mB" className="w-full md:w-56 bg-white/10 border border-white/20 rounded-xl p-3 md:p-3.5 text-white placeholder-indigo-200 outline-none focus:bg-white/20 focus:border-white/40 transition font-mono text-sm font-bold shadow-inner" required />
+                  <button type="submit" disabled={isJoining} className="bg-white text-indigo-700 px-6 py-3 md:py-3.5 rounded-xl font-black hover:bg-indigo-50 transition shadow-lg disabled:opacity-70 flex items-center justify-center gap-2 shrink-0">{isJoining ? <i className="fas fa-spinner fa-spin"></i> : "Join"}</button>
+                </form>
               </div>
 
               {/* IN-PROGRESS EXAMS WITH HOVER */}
@@ -600,7 +827,7 @@ export default function StudentDashboard() {
                       <div key={prog.id} onClick={() => router.push(`/student/exam/${prog.mockId}`)} className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm relative overflow-hidden group hover:-translate-y-1 hover:shadow-md hover:border-amber-400 transition-all duration-200 cursor-pointer">
                         <div className="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
                         <div className="flex justify-between items-start mb-2">
-                          <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider border border-amber-200">Resumable</span>
+                          <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider border border-amber-200"><i className="fas fa-pause-circle mr-1"></i> Resumable</span>
                           <span className="text-[10px] font-black text-slate-500 font-mono bg-slate-100 px-1.5 py-0.5 rounded"><i className="fas fa-clock text-amber-500 mr-1"></i> {Math.floor(prog.timeLeft / 60)}m left</span>
                         </div>
                         <h3 className="font-bold text-slate-900 mt-1 mb-4 truncate text-sm">{prog.mockTitle || "Live Mock Exam"}</h3>
@@ -633,7 +860,7 @@ export default function StudentDashboard() {
                   <div className="bg-white p-8 rounded-xl border border-slate-200 text-center text-slate-500 shadow-sm">
                     <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-2 border border-slate-100"><i className="fas fa-folder-open text-xl text-slate-400"></i></div>
                     <h3 className="text-sm font-black text-slate-800 mb-1">No public exams found</h3>
-                    <p className="font-medium text-[10px]">No active exams for <strong className="text-indigo-600">{selectedCategory}</strong> right now.</p>
+                    <div className="font-medium text-[10px]">No active exams for <strong className="text-indigo-600">{selectedCategory}</strong> right now.</div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -646,7 +873,7 @@ export default function StudentDashboard() {
                             <span className="text-[10px] font-bold text-slate-500 mt-0.5 bg-slate-100 px-1.5 py-0.5 rounded"><i className="fas fa-clock mr-1 text-slate-400"></i> {mock.duration}m</span>
                           </div>
                           <h3 className="font-black text-slate-900 text-sm mb-1.5 leading-tight pr-10 group-hover:text-indigo-600 transition-colors">{mock.title}</h3>
-                          <p className="text-[10px] font-bold text-slate-500 mb-4 flex items-center gap-1"><i className="fas fa-user-circle text-slate-400"></i> By {mock.educatorName || "Platform Educator"}</p>
+                          <div className="text-[10px] font-bold text-slate-500 mb-5 flex items-center gap-1.5"><div className="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center"><i className="fas fa-user text-slate-400 text-[8px]"></i></div> By {mock.educatorName || "Platform Educator"}</div>
                         </div>
                         <button className="w-full bg-indigo-50 text-indigo-700 border border-indigo-200 py-2 rounded-lg text-xs font-black group-hover:bg-indigo-600 group-hover:text-white transition-colors shadow-sm">Start Mock Test</button>
                       </div>
@@ -705,7 +932,7 @@ export default function StudentDashboard() {
                                     </button>
                                   </td>
                                 </tr>
-                              )
+                               )
                             })}
                           </tbody>
                         </table>

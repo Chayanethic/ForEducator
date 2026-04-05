@@ -32,18 +32,28 @@ export default function EducatorDashboard() {
     if (isLoaded && isSignedIn) fetchDashboardData();
   }, [user, isLoaded, isSignedIn]);
 
-  if (!isLoaded || isLoading) return <div className="flex h-screen items-center justify-center bg-slate-50"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>;
+  // --- PREMIUM UPGRADE: BRANDED LOADING SCREEN ---
+  if (!isLoaded || isLoading) return (
+    <div className="flex h-screen items-center justify-center bg-slate-50 flex-col animate-in fade-in duration-500">
+      <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-indigo-700 text-indigo-50 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-xl shadow-indigo-900/30 border border-indigo-400/30 transform -rotate-3 animate-pulse">
+        <i className="fas fa-book-open-reader"></i>
+      </div>
+      <h2 className="text-xl font-black text-slate-900 tracking-tight animate-pulse">Loading Workspace...</h2>
+    </div>
+  );
 
   return (
-    <div className="flex h-screen bg-slate-50 font-sans">
+    <div className="flex h-screen bg-slate-50 font-sans relative overflow-hidden">
       
-      {/* SIDEBAR */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-indigo-950 text-white flex flex-col transform transition-transform duration-300 md:relative md:translate-x-0 ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
+      {isMobileMenuOpen && ( <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)} /> )}
+
+      {/* UNIFIED INDIGO SIDEBAR */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-indigo-950 text-white flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
         <div className="flex items-center justify-between p-5 border-b border-indigo-900">
           <Link href="/onboarding?switch=true" className="text-xl font-black flex items-center gap-2 hover:text-emerald-400 transition cursor-pointer tracking-tight">
             <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
           </Link>
-          <button className="md:hidden text-indigo-300" onClick={() => setIsMobileMenuOpen(false)}><i className="fas fa-times text-lg"></i></button>
+          <button className="md:hidden text-indigo-300 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}><i className="fas fa-times text-lg"></i></button>
         </div>
         <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
             <button onClick={() => router.push('/educator/dashboard')} className="w-full flex items-center gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-emerald-400 shadow-inner">
@@ -59,8 +69,17 @@ export default function EducatorDashboard() {
                 <i className="fas fa-bolt w-4"></i> Live Quiz Poll
             </button>
         </nav>
-        <div className="p-3 border-t border-indigo-900 bg-indigo-900/30">
-            <button onClick={() => signOut({ redirectUrl: '/' })} className="w-full flex items-center justify-center gap-2 text-rose-400 hover:bg-rose-600 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-rose-900/50 bg-rose-950/20 shadow-sm">
+        
+        {/* --- FIXED: FULL USER PROFILE & SWITCH ROLE ADDED HERE --- */}
+        <div className="p-3 border-t border-indigo-900 bg-indigo-900/30 space-y-1.5">
+            <div className="flex items-center gap-2.5 p-2.5 bg-indigo-950/50 rounded-xl border border-indigo-800/50 shadow-inner">
+                <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Educator"} alt="Avatar" className="w-7 h-7 rounded-full border border-indigo-700" />
+                <div className="text-xs font-bold truncate flex-1 text-indigo-100">{user?.fullName || "Account"}</div>
+            </div>
+            <button onClick={() => router.push('/onboarding?switch=true')} className="w-full flex items-center justify-center gap-2 text-indigo-300 hover:bg-indigo-800 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-transparent hover:border-indigo-700 shadow-sm">
+                <i className="fas fa-exchange-alt"></i> Switch Role
+            </button>
+            <button onClick={() => signOut({ redirectUrl: '/' })} className="w-full flex items-center justify-center gap-2 text-rose-400 hover:bg-rose-600 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-rose-900/50 hover:border-rose-500 bg-rose-950/20 shadow-sm">
                 <i className="fas fa-sign-out-alt"></i> Log Out
             </button>
         </div>
@@ -75,7 +94,7 @@ export default function EducatorDashboard() {
           </div>
           <div className="flex items-center gap-3">
              <span className="text-sm font-bold text-slate-700 hidden sm:block">Welcome, {user?.firstName}</span>
-             <img src={user?.imageUrl} alt="Avatar" className="w-9 h-9 rounded-full border-2 border-indigo-100" />
+             <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Educator"} alt="Avatar" className="w-9 h-9 rounded-full border-2 border-indigo-100" />
           </div>
         </header>
 

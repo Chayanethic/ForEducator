@@ -6,6 +6,10 @@ import { useUser } from "@clerk/nextjs";
 import { doc, getDoc, collection, getDocs, addDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
+// --- MATH RENDERING IMPORTS ---
+import 'katex/dist/katex.min.css';
+import Latex from 'react-latex-next';
+
 // --- DRAGGABLE TCS iON CALCULATOR COMPONENT ---
 const DraggableCalculator = ({ onClose }) => {
   const [position, setPosition] = useState({ x: 100, y: 100 });
@@ -709,12 +713,20 @@ export default function ExamInterface() {
 
           <div className="flex-1 overflow-y-auto p-8 text-base">
             <div className="max-w-4xl mx-auto">
-                <p className="mb-6 whitespace-pre-wrap font-bold text-slate-900 leading-relaxed text-lg">{currentQ.text}</p>
-                {currentQ.imageUrl && (
-                  <div className="mb-8 p-3 border border-slate-200 rounded-xl bg-slate-50 inline-block shadow-sm">
-                    <img src={currentQ.imageUrl} alt="Diagram" className="max-h-80 object-contain pointer-events-none" draggable="false" />
+                
+                {/* --- UPGRADED QUESTION AND DIAGRAM RENDERER --- */}
+                <div className="mb-8">
+                  <div className="font-bold text-slate-900 leading-relaxed text-lg whitespace-pre-wrap overflow-x-auto">
+                    <Latex>{currentQ.text}</Latex>
                   </div>
-                )}
+                  
+                  {/* Dedicated Question Diagram Container */}
+                  {currentQ.imageUrl && (
+                    <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-slate-50 inline-block shadow-sm">
+                      <img src={currentQ.imageUrl} alt="Question Diagram" className="max-h-[350px] object-contain pointer-events-none" draggable="false" />
+                    </div>
+                  )}
+                </div>
                 
                 {currentQType === 'NAT' ? (
                   <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 mt-6 shadow-inner w-full max-w-sm">
@@ -743,9 +755,15 @@ export default function ExamInterface() {
                                 onChange={() => handleAnswerChange(opt.id, currentQType)} 
                                 className={`mt-1 w-5 h-5 cursor-pointer shrink-0 accent-indigo-600 ${currentQType === 'MSQ' ? 'rounded-sm' : ''}`} 
                               />
-                              <div>
-                                <span className="block font-bold text-slate-800 text-base">{opt.text}</span>
-                                {opt.imageUrl && <img src={opt.imageUrl} alt={`Option ${opt.id}`} className="max-h-32 mt-3 object-contain border border-slate-200 rounded-lg p-1 bg-white shadow-sm pointer-events-none" draggable="false" />}
+                              <div className="flex-1 overflow-x-auto">
+                                <div className="font-bold text-slate-800 text-base"><Latex>{opt.text}</Latex></div>
+                                
+                                {/* Dedicated Option Diagram Container */}
+                                {opt.imageUrl && (
+                                  <div className="mt-3 inline-block">
+                                    <img src={opt.imageUrl} alt={`Option ${opt.id} Diagram`} className="max-h-32 object-contain border border-slate-200 rounded-lg p-1.5 bg-white shadow-sm pointer-events-none" draggable="false" />
+                                  </div>
+                                )}
                               </div>
                           </label>
                         )

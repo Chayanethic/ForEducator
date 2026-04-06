@@ -10,7 +10,7 @@ import { db } from "@/lib/firebase";
 import 'katex/dist/katex.min.css';
 import Latex from 'react-latex-next';
 
-// --- DRAGGABLE TCS iON CALCULATOR COMPONENT ---
+// --- DRAGGABLE CALCULATOR COMPONENT ---
 const DraggableCalculator = ({ onClose }) => {
   const [position, setPosition] = useState({ x: 100, y: 100 });
   const [isDragging, setIsDragging] = useState(false);
@@ -98,7 +98,8 @@ const DraggableCalculator = ({ onClose }) => {
 };
 
 export default function ExamInterface() {
-  const { mockId } = useParams();
+  const params = useParams();
+  const mockId = params?.mockId || params?.['mock-id']; 
   const router = useRouter();
   const { user, isLoaded } = useUser();
 
@@ -129,30 +130,187 @@ export default function ExamInterface() {
   const containerRef = useRef(null);
   const [isSubmittingEngine, setIsSubmittingEngine] = useState(false);
 
+  // --- SECURITY STATE & REFS ---
+  const videoRef = useRef(null); // Single visible video ref
+  
+  const [mediaStream, setMediaStream] = useState(null);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [violationCount, setViolationCount] = useState(0);
+
+  // This flag prevents false "Window Blur" alarms during the fullscreen transition
+  const [isStrictProctoringActive, setIsStrictProctoringActive] = useState(false); 
+
+  // --- AI PROCTORING STATE ---
+  const [aiModel, setAiModel] = useState(null);
+  const [isAiLoading, setIsAiLoading] = useState(true);
+
   const showToast = (message, type = "success") => {
     setToast({ show: true, message, type });
     setTimeout(() => setToast({ show: false, message: "", type: "success" }), 3000);
   };
 
-  const triggerExitWarning = () => {
-    setModal({
-      show: true,
-      type: "warning",
-      title: "Are you sure you want to exit?",
-      message: "You have exited the strict fullscreen exam environment. If you leave now, your progress will be saved but you will exit the test. Do you want to return?",
-      confirmText: "Return to Exam",
-      cancelText: "Leave Exam",
-      dangerCancel: true, 
-      hideCancel: false,
-      onConfirm: () => {
-        enterFullScreen();
-        setModal({ show: false, type: "" });
-      },
-      onCancel: () => {
-        exitFullScreen();
-        router.replace("/student"); 
+  // --- LOAD TENSORFLOW AI MODEL ---
+  useEffect(() => {
+    const loadAiModel = async () => {
+      try {
+        const tf = await import('@tensorflow/tfjs');
+        const cocoSsd = await import('@tensorflow-models/coco-ssd');
+        await tf.ready(); 
+        const model = await cocoSsd.load();
+        setAiModel(model);
+        setIsAiLoading(false);
+      } catch (error) {
+        console.error("Error loading AI Proctoring model:", error);
+        showToast("Failed to load AI Engine. Exam cannot start.", "error");
       }
+    };
+    loadAiModel();
+  }, []);
+
+  // --- CAMERA ACTIVATION LOGIC ---
+  const requestCameraAccess = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          width: { ideal: 640 }, 
+          height: { ideal: 480 },
+          facingMode: "user" 
+        }, 
+        audio: false 
+      });
+      setMediaStream(stream);
+      setIsCameraActive(true);
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      
+      showToast("Camera accessed securely.", "success");
+    } catch (err) {
+      console.error("Camera access denied:", err);
+      showToast("Camera access is mandatory for this exam.", "error");
+    }
+  };
+
+  // --- CLEANUP CAMERA ON UNMOUNT ---
+  useEffect(() => {
+    return () => {
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [mediaStream]);
+
+  // --- ACTIVATE STRICT PROCTORING (WITH GRACE PERIOD) ---
+  useEffect(() => {
+    if (examPhase === 'active') {
+      // Wait 3 seconds before activating strict listeners to allow the browser to enter Fullscreen without triggering a false tab-switch alarm.
+      const timer = setTimeout(() => setIsStrictProctoringActive(true), 3000);
+      return () => clearTimeout(timer);
+    } else {
+      setIsStrictProctoringActive(false);
+    }
+  }, [examPhase]);
+
+  // --- AI PROCTORING DETECTION LOOP ---
+  useEffect(() => {
+    // Wait until strict proctoring is active to start logging violations
+    if (!isStrictProctoringActive || !isCameraActive || !aiModel || modal.show) return;
+
+    let detectionInterval;
+
+    const runAiDetection = async () => {
+      // 2 = HAVE_CURRENT_DATA. Ensures video frame is ready to be analyzed.
+      if (videoRef.current && videoRef.current.readyState >= 2) {
+        try {
+          const predictions = await aiModel.detect(videoRef.current);
+          
+          // Debugging log: Open Developer Tools to see what the AI sees
+          console.log("AI Sight:", predictions); 
+
+          let personCount = 0;
+          let phoneDetected = false;
+
+          predictions.forEach(prediction => {
+            // Lowered threshold to 0.45 to catch phones easier
+            if (prediction.score > 0.45) {
+              if (prediction.class === 'person') personCount++;
+              if (prediction.class === 'cell phone') phoneDetected = true;
+            }
+          });
+
+          if (phoneDetected) {
+            handleViolation("AI Detection: Mobile Phone or unauthorized device detected");
+          } else if (personCount > 1) {
+            handleViolation("AI Detection: Multiple persons detected in camera frame");
+          }
+        } catch (error) {
+          console.error("Detection error:", error);
+        }
+      }
+    };
+
+    // Scans every 2.5 seconds
+    detectionInterval = setInterval(runAiDetection, 2500); 
+    return () => clearInterval(detectionInterval);
+  }, [isStrictProctoringActive, isCameraActive, aiModel, modal.show]);
+
+  // --- TAB SWITCH & SPLIT SCREEN DETECTION ---
+  useEffect(() => {
+    if (!isStrictProctoringActive || modal.show) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) handleViolation("Tab Switch Detected");
+    };
+
+    const handleBlur = () => {
+      handleViolation("Window Lost Focus / Split Screen Detected");
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [isStrictProctoringActive, modal.show]);
+
+  const handleViolation = (reason) => {
+    setViolationCount(prev => {
+      const newCount = prev + 1;
+      
+      if (newCount >= 3) {
+        setModal({
+          show: true,
+          type: "warning",
+          title: "Exam Terminated",
+          message: "You have exceeded the maximum number of security violations. Your exam is being submitted automatically.",
+          hideCancel: true,
+          confirmText: "Close",
+          onConfirm: () => executeSubmit()
+        });
+      } else {
+        setModal({
+          show: true,
+          type: "warning",
+          title: "Security Violation Logged",
+          message: `${reason}. Please return to the exam environment immediately. Strike ${newCount} of 3.`,
+          hideCancel: true,
+          confirmText: "Acknowledge",
+          onConfirm: () => {
+             enterFullScreen();
+             setModal({ show: false, type: "" });
+          }
+        });
+      }
+      return newCount;
     });
+  };
+
+  const triggerExitWarning = () => {
+    if (!isStrictProctoringActive || modal.show) return;
+    handleViolation("Exited Fullscreen Mode");
   };
 
   useEffect(() => {
@@ -174,7 +332,7 @@ export default function ExamInterface() {
     };
     document.addEventListener('fullscreenchange', handleFullScreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
-  }, [examPhase]);
+  }, [examPhase, isStrictProctoringActive]);
 
   useEffect(() => {
     if (examPhase === 'active') {
@@ -187,7 +345,7 @@ export default function ExamInterface() {
       window.addEventListener('popstate', handlePopState);
       return () => window.removeEventListener('popstate', handlePopState);
     }
-  }, [examPhase]);
+  }, [examPhase, isStrictProctoringActive]);
 
   const enterFullScreen = () => {
     const elem = document.documentElement;
@@ -206,6 +364,7 @@ export default function ExamInterface() {
 
   useEffect(() => {
     const fetchExamAndProgress = async () => {
+      if (!mockId) return;
       try {
         const mockRef = doc(db, "mocks", mockId);
         const mockSnap = await getDoc(mockRef);
@@ -299,9 +458,14 @@ export default function ExamInterface() {
   };
 
   const handleStartExam = () => {
-    if (!hasAcceptedRules) return;
+    if (!hasAcceptedRules || !isCameraActive || isAiLoading) return;
     enterFullScreen();
     setExamPhase('active');
+    
+    // Ensure the stream is firmly attached when UI swaps over
+    if (videoRef.current && mediaStream && videoRef.current.srcObject !== mediaStream) {
+      videoRef.current.srcObject = mediaStream;
+    }
   };
 
   const navigateQuestion = (targetIndex, forcedCurrentStatus = null) => {
@@ -466,6 +630,10 @@ export default function ExamInterface() {
     setExamPhase('submitting');
     exitFullScreen();
     
+    if (mediaStream) {
+       mediaStream.getTracks().forEach(track => track.stop());
+    }
+    
     try {
       let score = 0; let correct = 0; let incorrect = 0;
       
@@ -497,11 +665,13 @@ export default function ExamInterface() {
         }
       });
 
+      // NO SNAPSHOTS SAVED HERE
       await addDoc(collection(db, "results"), {
         studentId: user?.id || "anonymous", studentName: user?.fullName || "Student",
         studentEmail: user?.primaryEmailAddress?.emailAddress || "No Email", studentAvatar: user?.imageUrl || "",
         mockId: mockId, examTitle: mockDetails?.title, score: parseFloat(score.toFixed(2)),
         correct, incorrect, unattempted: questions.length - (correct + incorrect),
+        violations: violationCount,
         submittedAt: new Date(), answers 
       });
 
@@ -539,16 +709,61 @@ export default function ExamInterface() {
       <div className="bg-slate-50 min-h-screen font-sans flex flex-col items-center py-10 px-4 select-none">
         <div className="max-w-4xl w-full bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200">
           <div className="bg-slate-900 text-white p-6 flex justify-between items-center">
-            <h1 className="text-2xl font-bold"><i className="fas fa-clipboard-list text-indigo-400 mr-2"></i> General Instructions</h1>
+            <h1 className="text-2xl font-bold"><i className="fas fa-shield-halved text-indigo-400 mr-2"></i> AI Secure Exam Environment</h1>
             <div className="text-sm font-bold bg-slate-800 px-3 py-1 rounded">Duration: {mockDetails?.duration} mins</div>
           </div>
           
           <div className="p-8 text-slate-700 space-y-6 max-h-[60vh] overflow-y-auto">
-            <p className="font-bold text-lg text-slate-900">Please read the following instructions carefully.</p>
+            <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl flex flex-col md:flex-row gap-6">
+              <div className="flex-1">
+                <h3 className="font-black text-rose-700 flex items-center gap-2 mb-2"><i className="fas fa-robot"></i> AI Proctoring Requirements</h3>
+                <p className="text-sm font-medium text-rose-900 mb-3">
+                  This exam utilizes advanced AI computer vision. <strong>Webcam access is mandatory.</strong> The system actively scans for:
+                </p>
+                <ul className="list-disc pl-5 text-sm font-medium text-rose-900 mb-4 space-y-1">
+                  <li>Mobile phones or unauthorized devices in the frame.</li>
+                  <li>Multiple persons present in the camera view.</li>
+                  <li>Tab switching, window unfocusing, and exiting fullscreen.</li>
+                </ul>
+                <p className="text-sm font-bold text-rose-900">3 violations will result in automatic test termination.</p>
+                
+                <div className="mt-4 flex flex-col gap-3">
+                  {!isCameraActive ? (
+                    <button onClick={requestCameraAccess} className="bg-rose-600 w-fit text-white px-5 py-2 rounded-lg text-sm font-bold shadow-md hover:bg-rose-700 transition">
+                      Grant Camera Permission
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-3 text-emerald-600 font-bold bg-emerald-50 px-4 py-2 border border-emerald-200 rounded-lg w-fit">
+                      <i className="fas fa-check-circle"></i> Camera Active
+                    </div>
+                  )}
+
+                  {isAiLoading ? (
+                    <div className="flex items-center gap-2 text-indigo-600 font-bold text-sm">
+                      <i className="fas fa-circle-notch fa-spin"></i> Initializing AI Proctoring Model...
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 text-indigo-600 font-bold bg-indigo-50 px-4 py-2 border border-indigo-200 rounded-lg w-fit">
+                      <i className="fas fa-brain"></i> AI Engine Ready
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* LIVE PREVIEW BOX IN INSTRUCTIONS */}
+              {isCameraActive && (
+                <div className="w-full md:w-64 shrink-0 bg-slate-900 rounded-xl overflow-hidden border-2 border-emerald-500 shadow-lg relative flex flex-col">
+                   <div className="bg-slate-800 text-white text-xs font-bold text-center py-1">Live Camera Preview</div>
+                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-40 object-cover transform scale-x-[-1]"></video>
+                </div>
+              )}
+            </div>
+
+            <p className="font-bold text-lg text-slate-900 mt-6">Please read the following instructions carefully.</p>
             <ul className="list-decimal pl-5 space-y-3 font-medium">
-              <li>The clock will be set at the server. The countdown timer at the top right of the screen will display the remaining time available for you to complete the examination.</li>
+              <li>The clock will be set at the server. The countdown timer will display the remaining time.</li>
               <li>When the timer reaches zero, the examination will end automatically.</li>
-              <li>This examination uses a strict Fullscreen Anti-Cheat mechanism. <strong>Do not attempt to exit fullscreen or press the Back button</strong>, as it will trigger a security warning.</li>
+              <li>This examination uses a strict Fullscreen Anti-Cheat mechanism.</li>
               <li><strong>Copying text and right-clicking are strictly prohibited.</strong></li>
             </ul>
 
@@ -565,15 +780,15 @@ export default function ExamInterface() {
           <div className="p-6 bg-slate-100 border-t border-slate-200">
             <label className="flex items-start gap-3 cursor-pointer p-4 bg-white rounded-xl border border-slate-200 hover:border-indigo-400 transition shadow-sm">
               <input type="checkbox" checked={hasAcceptedRules} onChange={(e) => setHasAcceptedRules(e.target.checked)} className="mt-1 w-5 h-5 accent-indigo-600 cursor-pointer" />
-              <span className="text-sm font-bold text-slate-700">I have read and understood the instructions. I agree that in case of not adhering to the instructions, I will be disqualified.</span>
+              <span className="text-sm font-bold text-slate-700">I have read and understood the instructions. I agree that in case of not adhering to the instructions, including AI detection of unauthorized devices or persons, I will be disqualified.</span>
             </label>
             <div className="mt-6 flex justify-end">
               <button 
                 onClick={handleStartExam} 
-                disabled={!hasAcceptedRules}
-                className={`px-8 py-3.5 rounded-xl font-black shadow-md transition transform flex items-center gap-2 ${hasAcceptedRules ? 'bg-indigo-600 text-white hover:bg-indigo-700 hover:-translate-y-0.5 shadow-indigo-600/30' : 'bg-slate-300 text-slate-500 cursor-not-allowed'}`}
+                disabled={!hasAcceptedRules || !isCameraActive || isAiLoading}
+                className={`px-8 py-3.5 rounded-xl font-black shadow-md transition transform flex items-center gap-2 ${(hasAcceptedRules && isCameraActive && !isAiLoading) ? 'bg-indigo-600 text-white hover:bg-indigo-700 hover:-translate-y-0.5 shadow-indigo-600/30' : 'bg-slate-300 text-slate-500 cursor-not-allowed'}`}
               >
-                I am ready to begin <i className="fas fa-play ml-1"></i>
+                {(!isCameraActive || isAiLoading) ? 'Waiting for System Readiness' : 'I am ready to begin'} <i className="fas fa-play ml-1"></i>
               </button>
             </div>
           </div>
@@ -671,6 +886,29 @@ export default function ExamInterface() {
             {mockDetails?.title || "Live Exam"}
         </div>
         <div className="flex items-center gap-4">
+            
+            <div className="flex flex-col items-end mr-2">
+              <span className={`text-[10px] font-bold tracking-widest uppercase ${isStrictProctoringActive ? 'text-emerald-400' : 'text-amber-400 animate-pulse'}`}>
+                {isStrictProctoringActive ? 'Strict Mode ON' : 'Initializing...'}
+              </span>
+              <div className="flex items-center gap-1.5 text-xs text-slate-300">
+                <i className="fas fa-brain text-indigo-400"></i> AI Scanning
+              </div>
+            </div>
+
+            {/* LARGER VISIBLE CAMERA FEED */}
+            <div className="w-24 h-16 rounded overflow-hidden bg-black border-2 border-emerald-500 relative shadow-inner shadow-black/50">
+               {/* This is the exact video feed the AI model will scan */}
+               <video ref={(el) => {
+                 if (el && mediaStream && el.srcObject !== mediaStream) {
+                   el.srcObject = mediaStream;
+                   // Ensure videoRef is kept in sync for the AI model
+                   videoRef.current = el; 
+                 }
+               }} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]"></video>
+               <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse shadow-rose-500 shadow-sm"></div>
+            </div>
+
             {mockDetails?.allowCalculator !== false && (
               <button onClick={() => setShowCalculator(!showCalculator)} className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition border ${showCalculator ? 'bg-indigo-600 text-white border-indigo-500 shadow-inner' : 'bg-slate-800 text-slate-200 hover:bg-slate-700 border-slate-700'}`}>
                   <i className="fas fa-calculator text-indigo-300"></i> Calculator
@@ -713,14 +951,11 @@ export default function ExamInterface() {
 
           <div className="flex-1 overflow-y-auto p-8 text-base">
             <div className="max-w-4xl mx-auto">
-                
-                {/* --- UPGRADED QUESTION AND DIAGRAM RENDERER --- */}
                 <div className="mb-8">
                   <div className="font-bold text-slate-900 leading-relaxed text-lg whitespace-pre-wrap overflow-x-auto">
                     <Latex>{currentQ.text}</Latex>
                   </div>
                   
-                  {/* Dedicated Question Diagram Container */}
                   {currentQ.imageUrl && (
                     <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-slate-50 inline-block shadow-sm">
                       <img src={currentQ.imageUrl} alt="Question Diagram" className="max-h-[350px] object-contain pointer-events-none" draggable="false" />
@@ -743,7 +978,7 @@ export default function ExamInterface() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
                       {currentQ.options?.map((opt, i) => {
                         const isSelected = currentQType === 'MSQ' 
-                          ? (Array.isArray(answers[currentIndex]) && answers[currentQIndex].includes(opt.id))
+                          ? (Array.isArray(answers[currentIndex]) && answers[currentIndex].includes(opt.id))
                           : answers[currentIndex] === opt.id;
 
                         return (
@@ -758,7 +993,6 @@ export default function ExamInterface() {
                               <div className="flex-1 overflow-x-auto">
                                 <div className="font-bold text-slate-800 text-base"><Latex>{opt.text}</Latex></div>
                                 
-                                {/* Dedicated Option Diagram Container */}
                                 {opt.imageUrl && (
                                   <div className="mt-3 inline-block">
                                     <img src={opt.imageUrl} alt={`Option ${opt.id} Diagram`} className="max-h-32 object-contain border border-slate-200 rounded-lg p-1.5 bg-white shadow-sm pointer-events-none" draggable="false" />
@@ -788,9 +1022,7 @@ export default function ExamInterface() {
           </div>
         </main>
 
-        {/* RIGHT PANEL - EXAM SUMMARY */}
         <aside className="w-[320px] bg-slate-50 flex flex-col shrink-0 border-l border-slate-200 overflow-hidden">
-          
           <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-4 shrink-0">
             <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Student&background=4F46E5&color=fff"} alt="Candidate" className="w-14 h-14 rounded-lg border border-slate-200 shadow-sm pointer-events-none" />
             <div>
@@ -799,7 +1031,6 @@ export default function ExamInterface() {
             </div>
           </div>
 
-          {/* --- LIVE EXAM SUMMARY STATS --- */}
           <div className="p-4 border-b border-slate-200 bg-white shrink-0">
             <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
               <span className="text-xs font-black text-slate-700 uppercase tracking-widest">Total Questions</span>

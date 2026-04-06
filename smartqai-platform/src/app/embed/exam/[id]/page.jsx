@@ -125,6 +125,14 @@ export default function IframeStudentPlayer({ params }) {
   const [warningAlert, setWarningAlert] = useState({ show: false, reason: "", count: 0, isFinal: false });
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
 
+  // --- AI PROCTORING & CAMERA STATE ---
+  const videoRef = useRef(null); 
+  const [mediaStream, setMediaStream] = useState(null);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [aiModel, setAiModel] = useState(null);
+  const [isAiLoading, setIsAiLoading] = useState(true);
+  const [isStrictProctoringActive, setIsStrictProctoringActive] = useState(false);
+
   // 1. Fetch Exam Data
   useEffect(() => {
     const fetchExam = async () => {
@@ -148,36 +156,100 @@ export default function IframeStudentPlayer({ params }) {
     if (mockId) fetchExam();
   }, [mockId]);
 
+  // --- LOAD TENSORFLOW AI MODEL ---
+  useEffect(() => {
+    const loadAiModel = async () => {
+      try {
+        const tf = await import('@tensorflow/tfjs');
+        const cocoSsd = await import('@tensorflow-models/coco-ssd');
+        await tf.ready(); 
+        const model = await cocoSsd.load();
+        setAiModel(model);
+        setIsAiLoading(false);
+      } catch (error) {
+        console.error("Error loading AI Proctoring model:", error);
+        setFormError("Failed to load AI Engine. Exam cannot start.");
+      }
+    };
+    loadAiModel();
+  }, []);
+
+  // --- CAMERA ACTIVATION LOGIC ---
+  const requestCameraAccess = async (e) => {
+    if (e) e.preventDefault();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }, 
+        audio: false 
+      });
+      setMediaStream(stream);
+      setIsCameraActive(true);
+      setFormError(""); 
+    } catch (err) {
+      console.error("Camera access denied:", err);
+      setFormError("Camera access is mandatory for this exam. Please allow it in your browser settings.");
+    }
+  };
+
+  // Keep Video Stream Attached to Ref
+  useEffect(() => {
+    if (videoRef.current && mediaStream && videoRef.current.srcObject !== mediaStream) {
+      videoRef.current.srcObject = mediaStream;
+    }
+  }, [mediaStream, hasStarted]);
+
+  // Clean up Camera on unmount
+  useEffect(() => {
+    return () => {
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [mediaStream]);
+
   // 2. Timer Engine
   useEffect(() => {
-    if (!hasStarted || isFinished || timeLeft <= 0) return;
+    if (!hasStarted || isFinished || timeLeft <= 0 || warningAlert.show) return;
     const timer = setInterval(() => {
       setTimeLeft(prev => {
-        if (prev <= 1) { submitExam(); return 0; }
+        if (prev <= 1) { submitExam(true); return 0; }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [hasStarted, isFinished, timeLeft]);
+  }, [hasStarted, isFinished, timeLeft, warningAlert.show]);
 
   // ==========================================
   // AGGRESSIVE ANTI-CHEAT ENGINE
   // ==========================================
-  useEffect(() => {
-    if (!hasStarted || isFinished) return;
 
-    const issueWarning = (reason) => {
-      setWarnings(prev => {
-        const newWarnings = prev + 1;
-        if (newWarnings >= MAX_WARNINGS) {
-          setWarningAlert({ show: true, reason, count: newWarnings, isFinal: true });
-          setTimeout(() => submitExam(true), 3000); 
-        } else {
-          setWarningAlert({ show: true, reason, count: newWarnings, isFinal: false });
-        }
-        return newWarnings;
-      });
-    };
+  // Universal Warning Dispatcher
+  const issueWarning = (reason) => {
+    setWarnings(prev => {
+      const newWarnings = prev + 1;
+      if (newWarnings >= MAX_WARNINGS) {
+        setWarningAlert({ show: true, reason, count: newWarnings, isFinal: true });
+        setTimeout(() => submitExam(true), 3000); 
+      } else {
+        setWarningAlert({ show: true, reason, count: newWarnings, isFinal: false });
+      }
+      return newWarnings;
+    });
+  };
+
+  // Grace Period: Don't trigger 'Window Focus Lost' during the initial Fullscreen transition
+  useEffect(() => {
+    if (hasStarted && !isFinished) {
+      const timer = setTimeout(() => setIsStrictProctoringActive(true), 3000);
+      return () => clearTimeout(timer);
+    } else {
+      setIsStrictProctoringActive(false);
+    }
+  }, [hasStarted, isFinished]);
+
+  // Standard Listeners (Tabs, Focus, Shortcuts)
+  useEffect(() => {
+    if (!isStrictProctoringActive || isFinished || warningAlert.show) return;
 
     const handleVisibilityChange = () => {
       if (document.hidden) issueWarning("Tab switching detected");
@@ -222,7 +294,42 @@ export default function IframeStudentPlayer({ params }) {
       document.removeEventListener("contextmenu", preventAction);
       document.removeEventListener("copy", preventAction);
     };
-  }, [hasStarted, isFinished]);
+  }, [isStrictProctoringActive, isFinished, warningAlert.show]);
+
+  // AI Proctoring Loop
+  useEffect(() => {
+    if (!isStrictProctoringActive || isFinished || warningAlert.show || !aiModel || !isCameraActive) return;
+
+    const runAiDetection = async () => {
+      if (videoRef.current && videoRef.current.readyState >= 2) {
+        try {
+          const predictions = await aiModel.detect(videoRef.current);
+          console.log("AI Sight:", predictions); // Debugging: View in F12 console
+
+          let personCount = 0;
+          let phoneDetected = false;
+
+          predictions.forEach(prediction => {
+            if (prediction.score > 0.45) { // 45% threshold to catch phones reliably
+              if (prediction.class === 'person') personCount++;
+              if (prediction.class === 'cell phone') phoneDetected = true;
+            }
+          });
+
+          if (phoneDetected) {
+            issueWarning("AI Detection: Mobile Phone or unauthorized device detected");
+          } else if (personCount > 1) {
+            issueWarning("AI Detection: Multiple persons detected in camera frame");
+          }
+        } catch (error) {
+          console.error("AI Detection error:", error);
+        }
+      }
+    };
+
+    const detectionInterval = setInterval(runAiDetection, 2500); 
+    return () => clearInterval(detectionInterval);
+  }, [isStrictProctoringActive, isFinished, warningAlert.show, aiModel, isCameraActive]);
 
   // ==========================================
   // EXAM CONTROLS & FORM VALIDATION
@@ -233,8 +340,16 @@ export default function IframeStudentPlayer({ params }) {
     setFormError(""); 
 
     // ⚡ STRICT FORM VALIDATION ⚡
+    if (!isCameraActive) {
+      setFormError("You must grant camera permission to start the secure exam.");
+      return;
+    }
+    if (isAiLoading) {
+      setFormError("Please wait for the AI Security Engine to load.");
+      return;
+    }
+
     const { name, email, phone } = studentInfo;
-    
     if (name.trim().length < 3) {
       setFormError("Please enter your full, real name.");
       return;
@@ -302,6 +417,10 @@ export default function IframeStudentPlayer({ params }) {
     setIsFinished(true);
     setShowSubmitConfirm(false);
     
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(track => track.stop());
+    }
+
     if (document.fullscreenElement || document.webkitFullscreenElement) {
       if (document.exitFullscreen) {
         document.exitFullscreen().catch(e => console.log(e));
@@ -406,7 +525,7 @@ export default function IframeStudentPlayer({ params }) {
   if (!hasStarted) {
     return (
       <div className="min-h-screen bg-slate-100 font-sans flex items-center justify-center p-4">
-        <div className="bg-white rounded-[2rem] shadow-2xl max-w-xl w-full overflow-hidden border border-slate-200">
+        <div className="bg-white rounded-[2rem] shadow-2xl max-w-4xl w-full overflow-hidden border border-slate-200">
           <div className="bg-slate-900 p-8 text-center relative border-b-4 border-indigo-500">
             {examData.orgLogo ? (
                <img src={examData.orgLogo} alt="Logo" className="w-16 h-16 object-contain mx-auto mb-4 bg-white p-2 rounded-xl shadow-md" />
@@ -417,43 +536,73 @@ export default function IframeStudentPlayer({ params }) {
             <p className="text-slate-400 font-bold text-sm">Powered by {examData.orgName}</p>
           </div>
 
-          <div className="p-8">
-            <div className="bg-rose-50 border border-rose-200 text-rose-700 p-4 rounded-xl mb-6 text-xs font-black shadow-sm">
-               <i className="fas fa-shield-alt mr-1"></i> STRICT ANTI-CHEAT ENABLED
-               <ul className="mt-2 ml-4 list-disc font-bold opacity-80 space-y-1">
-                 <li>Browser will lock into Full Screen mode.</li>
-                 <li>Switching tabs or clicking other apps will flag your exam.</li>
-                 <li>Screenshots, Copy, and Paste are disabled.</li>
-               </ul>
+          <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+            
+            {/* LEFT: SECURITY RULES & CAMERA SETUP */}
+            <div className="space-y-6">
+              <div className="bg-rose-50 border border-rose-200 text-rose-800 p-5 rounded-xl shadow-sm">
+                 <h3 className="font-black flex items-center gap-2 mb-3 text-lg"><i className="fas fa-robot text-rose-600"></i> AI Proctoring Rules</h3>
+                 <ul className="ml-5 list-disc font-bold opacity-90 space-y-1.5 text-sm">
+                   <li>Camera access is mandatory.</li>
+                   <li>Mobile phones or extra people will be flagged.</li>
+                   <li>Browser will lock into Full Screen mode.</li>
+                   <li>Switching tabs will flag your exam.</li>
+                 </ul>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                {!isCameraActive ? (
+                  <button onClick={requestCameraAccess} className="w-full bg-rose-600 text-white px-5 py-3 rounded-xl font-black shadow-md hover:bg-rose-700 transition flex justify-center items-center gap-2">
+                    <i className="fas fa-camera"></i> Grant Camera Permission
+                  </button>
+                ) : (
+                  <div className="bg-slate-900 rounded-xl overflow-hidden border-[3px] border-emerald-500 shadow-lg relative flex flex-col w-full h-48">
+                     <div className="absolute top-2 right-2 bg-emerald-500/20 backdrop-blur text-emerald-400 text-[10px] font-black uppercase px-2 py-1 rounded border border-emerald-500/50 z-10 flex items-center gap-1">
+                       <i className="fas fa-video"></i> Active
+                     </div>
+                     <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]"></video>
+                  </div>
+                )}
+
+                {isCameraActive && (
+                  <div className={`p-3 rounded-xl border flex items-center gap-3 font-bold text-sm ${isAiLoading ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                    {isAiLoading ? <i className="fas fa-circle-notch fa-spin"></i> : <i className="fas fa-brain"></i>}
+                    {isAiLoading ? 'Initializing AI Engine...' : 'AI Proctoring Ready'}
+                  </div>
+                )}
+              </div>
             </div>
 
-            <form onSubmit={startSecureExam} className="space-y-4">
-              <div>
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Full Name</label>
-                <input required type="text" value={studentInfo.name} onChange={e => setStudentInfo({...studentInfo, name: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors" placeholder="e.g. Rahul Sharma" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+            {/* RIGHT: STUDENT FORM */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 shadow-inner">
+              <h3 className="font-black text-slate-800 mb-6 text-xl border-b border-slate-200 pb-3">Student Details</h3>
+              <form onSubmit={startSecureExam} className="space-y-5">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Full Name</label>
+                  <input required type="text" value={studentInfo.name} onChange={e => setStudentInfo({...studentInfo, name: e.target.value})} className="w-full bg-white border border-slate-300 rounded-xl p-3.5 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors shadow-sm" placeholder="e.g. Rahul Sharma" />
+                </div>
                 <div>
                   <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Email</label>
-                  <input required type="email" value={studentInfo.email} onChange={e => setStudentInfo({...studentInfo, email: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors" placeholder="rahul@example.com" />
+                  <input required type="email" value={studentInfo.email} onChange={e => setStudentInfo({...studentInfo, email: e.target.value})} className="w-full bg-white border border-slate-300 rounded-xl p-3.5 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors shadow-sm" placeholder="rahul@example.com" />
                 </div>
                 <div>
                   <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Mobile Number</label>
-                  <input required type="tel" value={studentInfo.phone} onChange={e => setStudentInfo({...studentInfo, phone: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors" placeholder="9876543210" />
+                  <input required type="tel" value={studentInfo.phone} onChange={e => setStudentInfo({...studentInfo, phone: e.target.value})} className="w-full bg-white border border-slate-300 rounded-xl p-3.5 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors shadow-sm" placeholder="9876543210" />
                 </div>
-              </div>
 
-              {/* ⚡ INLINE FORM ERROR DISPLAY ⚡ */}
-              {formError && (
-                <div className="bg-rose-50 border border-rose-200 text-rose-600 px-4 py-3 rounded-xl text-xs font-black flex items-center gap-2 animate-in fade-in slide-in-from-top-2 mt-4">
-                  <i className="fas fa-exclamation-circle text-base"></i> {formError}
-                </div>
-              )}
+                {/* ⚡ INLINE FORM ERROR DISPLAY ⚡ */}
+                {formError && (
+                  <div className="bg-rose-50 border border-rose-200 text-rose-600 px-4 py-3 rounded-xl text-xs font-black flex items-center gap-2 animate-in fade-in slide-in-from-top-2 mt-2">
+                    <i className="fas fa-exclamation-circle text-base"></i> {formError}
+                  </div>
+                )}
 
-              <button type="submit" className="w-full mt-6 bg-indigo-600 text-white py-4 rounded-xl font-black text-lg shadow-lg hover:bg-indigo-700 transition hover:-translate-y-0.5 flex items-center justify-center gap-2">
-                <i className="fas fa-lock"></i> Start Secure Exam
-              </button>
-            </form>
+                <button type="submit" disabled={!isCameraActive || isAiLoading} className={`w-full mt-4 text-white py-4 rounded-xl font-black text-lg shadow-lg transition flex items-center justify-center gap-2 ${(!isCameraActive || isAiLoading) ? 'bg-slate-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5 shadow-indigo-600/30'}`}>
+                  <i className="fas fa-lock"></i> {(!isCameraActive || isAiLoading) ? 'Waiting for Security' : 'Start Secure Exam'}
+                </button>
+              </form>
+            </div>
+
           </div>
         </div>
       </div>
@@ -540,7 +689,14 @@ export default function IframeStudentPlayer({ params }) {
                   </p>
                 </div>
               ) : (
-                <button onClick={() => setWarningAlert({ show: false, reason: "", count: 0, isFinal: false })} className="w-full bg-rose-600 text-white font-black py-4 rounded-xl hover:bg-rose-700 transition-colors shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2">
+                <button 
+                  onClick={() => {
+                    setWarningAlert({ show: false, reason: "", count: 0, isFinal: false });
+                    const elem = playerRef.current || document.documentElement;
+                    if (elem.requestFullscreen) elem.requestFullscreen().catch(e=>console.log(e));
+                  }} 
+                  className="w-full bg-rose-600 text-white font-black py-4 rounded-xl hover:bg-rose-700 transition-colors shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2"
+                >
                   <i className="fas fa-shield-alt"></i> I Understand, Return
                 </button>
               )}
@@ -590,13 +746,34 @@ export default function IframeStudentPlayer({ params }) {
       {showCalculator && <DraggableCalculator onClose={() => setShowCalculator(false)} />}
 
       {/* SECURE HEADER */}
-      <header className="bg-slate-900 border-b border-slate-800 h-14 md:h-16 px-4 md:px-6 flex justify-between items-center shrink-0 z-10 text-white">
+      <header className="bg-slate-900 border-b border-slate-800 h-16 px-4 md:px-6 flex justify-between items-center shrink-0 z-10 text-white">
         <div className="flex items-center gap-3">
           {examData.orgLogo && <img src={examData.orgLogo} alt="Logo" className="h-8 bg-white p-1 rounded-md" />}
           <span className="font-black text-sm tracking-wide hidden sm:block">{examData.title}</span>
         </div>
         
-        <div className="flex items-center gap-4 md:gap-8">
+        <div className="flex items-center gap-4 md:gap-6">
+          
+          <div className="flex flex-col items-end mr-1 hidden sm:flex">
+            <span className={`text-[10px] font-bold tracking-widest uppercase ${isStrictProctoringActive ? 'text-emerald-400' : 'text-amber-400 animate-pulse'}`}>
+              {isStrictProctoringActive ? 'Strict Mode ON' : 'Initializing...'}
+            </span>
+            <div className="flex items-center gap-1.5 text-xs text-slate-300">
+              <i className="fas fa-brain text-indigo-400"></i> AI Scanning
+            </div>
+          </div>
+
+          {/* TINY LIVE CAMERA PREVIEW IN HEADER */}
+          <div className="w-16 h-10 rounded overflow-hidden bg-black border border-emerald-500 relative shadow-inner shadow-black/50">
+             <video ref={(el) => {
+               if (el && mediaStream && el.srcObject !== mediaStream) {
+                 el.srcObject = mediaStream;
+                 videoRef.current = el; // Bind to TFJS ref
+               }
+             }} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]"></video>
+             <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse shadow-rose-500 shadow-sm"></div>
+          </div>
+
           {examData.allowCalculator && (
              <button onClick={() => setShowCalculator(!showCalculator)} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2">
                <i className="fas fa-calculator text-indigo-300"></i> <span className="hidden md:block">Calculator</span>

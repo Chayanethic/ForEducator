@@ -12,6 +12,8 @@
     "@clerk/nextjs": "^7.0.6",
     "@fortawesome/fontawesome-free": "^7.2.0",
     "@google/generative-ai": "^0.24.1",
+    "@tensorflow-models/coco-ssd": "^2.2.3",
+    "@tensorflow/tfjs": "^4.22.0",
     "@upstash/redis": "^1.37.0",
     "firebase": "^12.11.0",
     "katex": "^0.16.44",

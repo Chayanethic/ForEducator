@@ -729,20 +729,40 @@ export default function StudentDashboard() {
           <button className="md:hidden text-indigo-300 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}><i className="fas fa-times text-lg"></i></button>
         </div>
         
-        <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
-            <button onClick={() => navigateTo('/student')} className="w-full flex items-center text-left gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-emerald-400 shadow-inner">
-                <i className="fas fa-home w-4 text-emerald-400"></i> Dashboard
-            </button>
-            <button id="tour-sidebar-pyq" onClick={() => navigateTo('/student/pyq')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
-                <i className="fas fa-book-open w-4"></i> PYQ Practice
-            </button>
-            <button id="tour-sidebar-planner" onClick={() => navigateTo('/student/planner')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
-                <i className="fas fa-calendar-check w-4"></i> Study Planner
-            </button>
-            <button id="tour-sidebar-quiz" onClick={() => navigateTo('/student/quiz-battle')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
-                <i className="fas fa-gamepad w-4 text-rose-400 group-hover:animate-bounce"></i> Quiz Battle
-            </button>
-        </nav>
+       <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
+    {/* Dashboard */}
+    <button onClick={() => navigateTo('/student')} className="w-full flex items-center text-left gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-emerald-400 shadow-inner">
+        <i className="fas fa-home w-4 text-emerald-400"></i> Dashboard
+    </button>
+
+    {/* AI Exam Generator */}
+    <button onClick={() => navigateTo('/student/examgenerateusingai')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
+        <i className="fas fa-brain w-4 text-fuchsia-400 group-hover:animate-pulse"></i> AI Exam Generator
+        <span className="ml-auto bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">New</span>
+    </button>
+
+    {/* --- NEW: SMART FLASHCARDS BUTTON --- */}
+    <button onClick={() => navigateTo('/student/flashcard-generator')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
+        <i className="fas fa-bolt w-4 text-amber-400 group-hover:animate-pulse"></i> Smart Flashcards
+        <span className="ml-auto bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">New</span>
+    </button>
+    {/* ------------------------------------ */}
+
+    {/* PYQ Practice */}
+    <button id="tour-sidebar-pyq" onClick={() => navigateTo('/student/pyq')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
+        <i className="fas fa-book-open w-4"></i> PYQ Practice
+    </button>
+
+    {/* Study Planner */}
+    <button id="tour-sidebar-planner" onClick={() => navigateTo('/student/planner')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
+        <i className="fas fa-calendar-check w-4"></i> Study Planner
+    </button>
+
+    {/* Quiz Battle */}
+    <button id="tour-sidebar-quiz" onClick={() => navigateTo('/student/quiz-battle')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
+        <i className="fas fa-gamepad w-4 text-rose-400 group-hover:animate-bounce"></i> Quiz Battle
+    </button>
+</nav>
         
         <div className="p-3 border-t border-indigo-900 bg-indigo-900/30 space-y-1.5">
             <div className="flex items-center gap-2.5 p-2.5 bg-indigo-950/50 rounded-xl border border-indigo-800/50 shadow-inner">

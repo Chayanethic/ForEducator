@@ -740,10 +740,10 @@ export default function ExamInterface() {
                     />
                   </div>
                 ) : (
-                  <div className="space-y-4 mt-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
                       {currentQ.options?.map((opt, i) => {
                         const isSelected = currentQType === 'MSQ' 
-                          ? (Array.isArray(answers[currentIndex]) && answers[currentIndex].includes(opt.id))
+                          ? (Array.isArray(answers[currentIndex]) && answers[currentQIndex].includes(opt.id))
                           : answers[currentIndex] === opt.id;
 
                         return (

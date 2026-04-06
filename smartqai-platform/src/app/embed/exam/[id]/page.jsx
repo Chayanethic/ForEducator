@@ -8,6 +8,93 @@ import { db } from "@/lib/firebase";
 import 'katex/dist/katex.min.css';
 import Latex from 'react-latex-next';
 
+// --- DRAGGABLE TCS iON CALCULATOR COMPONENT ---
+const DraggableCalculator = ({ onClose }) => {
+  const [position, setPosition] = useState({ x: 100, y: 100 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [display, setDisplay] = useState("");
+
+  const handleMouseDown = (e) => {
+    setIsDragging(true);
+    setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (isDragging) {
+        setPosition({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
+      }
+    };
+    const handleMouseUp = () => setIsDragging(false);
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    }
+  }, [isDragging, dragOffset]);
+
+  const handleInput = (val) => setDisplay((prev) => prev + val);
+  const handleClear = () => setDisplay("");
+  const handleBackspace = () => setDisplay((prev) => prev.slice(0, -1));
+  
+  const handleCalculate = () => {
+    try {
+      const sanitized = display.replace(/\^/g, '**');
+      // eslint-disable-next-line no-new-func
+      const result = new Function('return ' + sanitized)();
+      setDisplay(String(Number(result.toFixed(6))));
+    } catch (error) {
+      setDisplay("Error");
+      setTimeout(() => setDisplay(""), 1500);
+    }
+  };
+
+  return (
+    <div style={{ left: position.x, top: position.y, position: 'fixed', zIndex: 9999 }} className="w-80 bg-slate-100 rounded-lg shadow-2xl border border-slate-300 overflow-hidden flex flex-col font-sans">
+      <div onMouseDown={handleMouseDown} className="bg-indigo-600 text-white px-4 py-2 cursor-grab active:cursor-grabbing flex justify-between items-center select-none">
+        <div className="font-bold text-sm tracking-wide"><i className="fas fa-calculator mr-2"></i> Scientific Calculator</div>
+        <button onClick={onClose} className="hover:text-rose-300 transition"><i className="fas fa-times"></i></button>
+      </div>
+      <div className="p-4 bg-white border-b border-slate-200">
+        <div className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-right font-mono text-xl text-slate-800 h-10 overflow-hidden tracking-wider shadow-inner">{display || "0"}</div>
+      </div>
+      <div className="p-3 grid grid-cols-5 gap-2 bg-slate-200">
+        <button onClick={() => handleInput('Math.sin(')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">sin</button>
+        <button onClick={() => handleInput('Math.cos(')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">cos</button>
+        <button onClick={() => handleInput('Math.tan(')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">tan</button>
+        <button onClick={() => handleInput('(')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">(</button>
+        <button onClick={() => handleInput(')')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">)</button>
+        <button onClick={() => handleInput('Math.sqrt(')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">√</button>
+        <button onClick={() => handleInput('^')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">x^y</button>
+        <button onClick={() => handleInput('Math.log10(')} className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold rounded py-2 shadow-sm transition">log</button>
+        <button onClick={handleClear} className="bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold rounded py-2 shadow-sm transition col-span-2">Clear</button>
+        <button onClick={() => handleInput('7')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">7</button>
+        <button onClick={() => handleInput('8')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">8</button>
+        <button onClick={() => handleInput('9')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">9</button>
+        <button onClick={handleBackspace} className="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded py-2 shadow-sm transition"><i className="fas fa-backspace"></i></button>
+        <button onClick={() => handleInput('/')} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-sm font-bold rounded py-2 shadow-sm transition">/</button>
+        <button onClick={() => handleInput('4')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">4</button>
+        <button onClick={() => handleInput('5')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">5</button>
+        <button onClick={() => handleInput('6')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">6</button>
+        <button onClick={() => handleInput('*')} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-sm font-bold rounded py-2 shadow-sm transition">*</button>
+        <button onClick={() => handleInput('-')} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-sm font-bold rounded py-2 shadow-sm transition">-</button>
+        <button onClick={() => handleInput('1')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">1</button>
+        <button onClick={() => handleInput('2')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">2</button>
+        <button onClick={() => handleInput('3')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">3</button>
+        <button onClick={() => handleInput('+')} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-sm font-bold rounded py-2 shadow-sm transition row-span-2 flex items-center justify-center h-full">+</button>
+        <button onClick={handleCalculate} className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded py-2 shadow-sm transition row-span-2 flex items-center justify-center h-full">=</button>
+        <button onClick={() => handleInput('0')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition col-span-2">0</button>
+        <button onClick={() => handleInput('.')} className="bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold rounded py-2 shadow-sm transition">.</button>
+      </div>
+    </div>
+  );
+};
+
 export default function IframeStudentPlayer({ params }) {
   const unwrappedParams = use(params);
   const mockId = unwrappedParams.id;
@@ -18,13 +105,14 @@ export default function IframeStudentPlayer({ params }) {
   const [questions, setQuestions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [studentInfo, setStudentInfo] = useState({ name: "", email: "", phone: "" });
-  const [formError, setFormError] = useState(""); // ⚡ NEW: Form Error State
+  const [formError, setFormError] = useState(""); 
   
   // Exam Engine State
   const [hasStarted, setHasStarted] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(0);
+  const [showCalculator, setShowCalculator] = useState(false);
   
   // Tracking Matrices
   const [answers, setAnswers] = useState({});
@@ -142,7 +230,7 @@ export default function IframeStudentPlayer({ params }) {
 
   const startSecureExam = (e) => {
     e.preventDefault();
-    setFormError(""); // Reset previous errors
+    setFormError(""); 
 
     // ⚡ STRICT FORM VALIDATION ⚡
     const { name, email, phone } = studentInfo;
@@ -158,13 +246,12 @@ export default function IframeStudentPlayer({ params }) {
       return;
     }
 
-    const phoneClean = phone.replace(/\D/g, ''); // Strip all non-numeric characters
+    const phoneClean = phone.replace(/\D/g, ''); 
     if (phoneClean.length < 10 || phoneClean.length > 15) {
       setFormError("Please enter a valid 10-digit mobile number.");
       return;
     }
 
-    // If validation passes, request fullscreen and start!
     const elem = playerRef.current || document.documentElement;
     try {
       if (elem.requestFullscreen) {
@@ -500,6 +587,8 @@ export default function IframeStudentPlayer({ params }) {
         </div>
       )}
 
+      {showCalculator && <DraggableCalculator onClose={() => setShowCalculator(false)} />}
+
       {/* SECURE HEADER */}
       <header className="bg-slate-900 border-b border-slate-800 h-14 md:h-16 px-4 md:px-6 flex justify-between items-center shrink-0 z-10 text-white">
         <div className="flex items-center gap-3">
@@ -508,29 +597,27 @@ export default function IframeStudentPlayer({ params }) {
         </div>
         
         <div className="flex items-center gap-4 md:gap-8">
+          {examData.allowCalculator && (
+             <button onClick={() => setShowCalculator(!showCalculator)} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2">
+               <i className="fas fa-calculator text-indigo-300"></i> <span className="hidden md:block">Calculator</span>
+             </button>
+          )}
           <div className={`font-mono text-lg md:text-2xl font-black flex items-center gap-2 tracking-wider ${timeLeft < 300 ? 'text-rose-400 animate-pulse' : 'text-emerald-400'}`}>
             <i className="far fa-clock"></i> {formatTime(timeLeft)}
           </div>
         </div>
       </header>
 
-      {/* SUB-HEADER (SECTIONS) */}
-      <div className="bg-slate-50 border-b border-slate-200 h-10 px-4 flex items-center gap-2 overflow-x-auto hide-scrollbar">
-         {Array.from(new Set(questions.map(q => q.section || "General"))).map((sec, idx) => (
-           <button key={idx} className="bg-indigo-600 text-white px-4 py-1 rounded text-xs font-black shadow-sm shrink-0 uppercase tracking-widest">{sec}</button>
-         ))}
-      </div>
-
       <div className="flex-1 flex overflow-hidden">
         
         {/* LEFT: QUESTION AREA */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col bg-white">
           <div className="max-w-4xl w-full mx-auto flex-1 flex flex-col">
             
-            <div className="flex justify-between items-center mb-4 border-b border-slate-200 pb-3">
+            <div className="flex justify-between items-center mb-6 border-b border-slate-200 pb-3">
               <div className="flex items-center gap-3">
                 <span className="text-xl font-black text-slate-800">Question {currentQIndex + 1}</span>
-                <span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded text-[10px] font-black tracking-widest">{currentQ.type}</span>
+                <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-black tracking-widest border border-slate-200">{currentQ.type}</span>
               </div>
               <div className="flex gap-2">
                 <span className="text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded text-xs font-black">+{currentQ.marks || 2}</span>
@@ -538,26 +625,30 @@ export default function IframeStudentPlayer({ params }) {
               </div>
             </div>
 
-            <div className="text-base md:text-lg font-bold text-slate-900 leading-relaxed mb-6">
-              <Latex>{currentQ.text}</Latex>
-            </div>
-
-            {currentQ.imageUrl && (
-              <div className="mb-8 rounded-xl border border-slate-200 bg-slate-50 p-2 shadow-inner">
-                <img src={currentQ.imageUrl} alt="Diagram" className="max-h-80 mx-auto object-contain pointer-events-none" />
+            {/* --- UPGRADED QUESTION AND DIAGRAM RENDERER --- */}
+            <div className="mb-8">
+              <div className="font-bold text-slate-900 leading-relaxed text-lg whitespace-pre-wrap overflow-x-auto">
+                <Latex>{currentQ.text}</Latex>
               </div>
-            )}
+              
+              {/* Dedicated Question Diagram Container */}
+              {currentQ.imageUrl && (
+                <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-slate-50 inline-block shadow-sm">
+                  <img src={currentQ.imageUrl} alt="Question Diagram" className="max-h-[350px] object-contain pointer-events-none" draggable="false" />
+                </div>
+              )}
+            </div>
 
             <div className="flex-1">
               {currentQ.type === 'NAT' ? (
-                <div className="bg-slate-50 border border-slate-300 rounded-xl p-6 shadow-inner">
-                  <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Numerical Value</label>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 shadow-inner w-full max-w-sm">
+                  <label className="block text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">Enter Numerical Value:</label>
                   <input 
                     type="number" 
                     value={answers[currentQIndex] || ''} 
                     onChange={(e) => handleNatInput(e.target.value)} 
-                    className="w-full max-w-xs bg-white border-2 border-slate-300 rounded-xl p-3 text-xl font-black text-slate-900 outline-none focus:border-indigo-500 shadow-sm" 
-                    placeholder="Enter answer..."
+                    className="w-full bg-white border-2 border-slate-300 rounded-xl p-4 text-2xl font-black text-slate-800 outline-none focus:border-indigo-500 shadow-sm transition" 
+                    placeholder="e.g. 4.5"
                   />
                 </div>
               ) : (
@@ -568,72 +659,79 @@ export default function IframeStudentPlayer({ params }) {
                       : answers[currentQIndex] === opt.id;
 
                     return (
-                      <div 
-                        key={idx} 
-                        onClick={() => handleAnswerSelect(opt.id)}
-                        className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex items-start gap-4 ${isSelected ? 'border-indigo-600 bg-indigo-50 shadow-md' : 'border-slate-200 hover:border-slate-400 bg-white'}`}
-                      >
+                      <label key={idx} className={`flex items-start gap-4 p-4 border-2 rounded-xl cursor-pointer transition-all shadow-sm ${isSelected ? 'border-indigo-600 bg-indigo-50 shadow-md' : 'border-slate-200 hover:border-slate-400 bg-white'}`}>
                         <div className={`w-6 h-6 shrink-0 mt-0.5 flex items-center justify-center border-2 ${currentQ.type === 'MSQ' ? 'rounded' : 'rounded-full'} ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-400 text-transparent'}`}>
                           <i className={`fas ${currentQ.type === 'MSQ' ? 'fa-check text-[10px]' : 'fa-circle text-[8px]'}`}></i>
                         </div>
+                        <input 
+                          type={currentQ.type === 'MSQ' ? "checkbox" : "radio"} 
+                          checked={isSelected} 
+                          onChange={() => handleAnswerSelect(opt.id)} 
+                          className="hidden" 
+                        />
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-bold text-slate-800 leading-relaxed"><Latex>{opt.text}</Latex></div>
-                          {opt.imageUrl && <img src={opt.imageUrl} alt="Option" className="max-h-32 mt-3 rounded-lg border border-slate-200 pointer-events-none" />}
+                          
+                          {/* Dedicated Option Diagram Container */}
+                          {opt.imageUrl && (
+                            <div className="mt-3 inline-block">
+                              <img src={opt.imageUrl} alt={`Option ${opt.id} Diagram`} className="max-h-32 object-contain border border-slate-200 rounded-lg p-1.5 bg-white shadow-sm pointer-events-none" draggable="false" />
+                            </div>
+                          )}
                         </div>
-                      </div>
+                      </label>
                     );
                   })}
                 </div>
               )}
             </div>
 
-          </div>
-
-          {/* BOTTOM CONTROLS */}
-          <div className="max-w-4xl w-full mx-auto mt-8 border-t border-slate-200 pt-4 flex flex-wrap justify-between gap-4">
-            <div className="flex gap-3">
-              <button 
-                onClick={toggleReview} 
-                className={`px-4 py-2.5 rounded-xl text-xs font-black shadow-sm transition border ${markedForReview[currentQIndex] ? 'bg-purple-100 text-purple-700 border-purple-300' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
-              >
-                <i className="fas fa-bookmark mr-1.5"></i> {markedForReview[currentQIndex] ? "Unmark Review" : "Mark for Review"}
-              </button>
-              <button onClick={clearResponse} className="bg-white border border-slate-300 text-slate-600 px-4 py-2.5 rounded-xl text-xs font-black shadow-sm hover:bg-slate-50 transition">
-                Clear Response
-              </button>
-            </div>
-            
-            <div className="flex gap-3">
-              <button onClick={() => navigateTo(Math.max(0, currentQIndex - 1))} disabled={currentQIndex === 0} className="bg-slate-800 text-white px-6 py-2.5 rounded-xl text-sm font-black shadow-md hover:bg-slate-700 transition disabled:opacity-50">
-                <i className="fas fa-arrow-left mr-2"></i> Prev
-              </button>
-              <button onClick={() => navigateTo(Math.min(questions.length - 1, currentQIndex + 1))} disabled={currentQIndex === questions.length - 1} className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl text-sm font-black shadow-md hover:bg-indigo-700 transition disabled:opacity-50">
-                Save & Next <i className="fas fa-arrow-right ml-2"></i>
-              </button>
+            {/* BOTTOM CONTROLS */}
+            <div className="mt-8 pt-4 border-t border-slate-200 flex flex-wrap justify-between gap-4">
+              <div className="flex gap-3">
+                <button 
+                  onClick={toggleReview} 
+                  className={`px-4 py-2.5 rounded-xl text-xs font-black shadow-sm transition border ${markedForReview[currentQIndex] ? 'bg-purple-100 text-purple-700 border-purple-300' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
+                >
+                  <i className="fas fa-bookmark mr-1.5"></i> {markedForReview[currentQIndex] ? "Unmark Review" : "Mark for Review"}
+                </button>
+                <button onClick={clearResponse} className="bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-xs font-black shadow-sm hover:bg-slate-200 transition">
+                  Clear
+                </button>
+              </div>
+              
+              <div className="flex gap-3">
+                <button onClick={() => navigateTo(Math.max(0, currentQIndex - 1))} disabled={currentQIndex === 0} className="bg-slate-800 text-white px-6 py-2.5 rounded-xl text-sm font-black shadow-md hover:bg-slate-700 transition disabled:opacity-50">
+                  <i className="fas fa-arrow-left"></i>
+                </button>
+                <button onClick={() => navigateTo(Math.min(questions.length - 1, currentQIndex + 1))} disabled={currentQIndex === questions.length - 1} className="bg-indigo-600 text-white px-8 py-2.5 rounded-xl text-sm font-black shadow-md hover:bg-indigo-700 transition disabled:opacity-50">
+                  Next <i className="fas fa-arrow-right ml-2"></i>
+                </button>
+              </div>
             </div>
           </div>
         </main>
 
-        {/* RIGHT: QUESTION PALETTE & STATUS */}
+        {/* RIGHT: QUESTION PALETTE */}
         <aside className="w-72 bg-slate-50 border-l border-slate-200 hidden lg:flex flex-col shrink-0">
           
-          <div className="p-4 grid grid-cols-2 gap-2 text-[10px] font-black uppercase tracking-wide border-b border-slate-200">
-             <div className="bg-emerald-100 border border-emerald-300 text-emerald-800 p-2 rounded-lg flex justify-between items-center">
+          <div className="p-4 grid grid-cols-2 gap-2 text-[10px] font-black uppercase tracking-wide border-b border-slate-200 bg-white">
+             <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-2 rounded-lg flex justify-between items-center">
                <span>Answered</span> <span className="text-sm">{answeredCount}</span>
              </div>
-             <div className="bg-rose-100 border border-rose-300 text-rose-800 p-2 rounded-lg flex justify-between items-center">
+             <div className="bg-rose-50 border border-rose-200 text-rose-700 p-2 rounded-lg flex justify-between items-center">
                <span>Not Ans</span> <span className="text-sm">{notAnsweredCount}</span>
              </div>
-             <div className="bg-slate-200 border border-slate-300 text-slate-700 p-2 rounded-lg flex justify-between items-center">
+             <div className="bg-slate-100 border border-slate-200 text-slate-600 p-2 rounded-lg flex justify-between items-center">
                <span>Not Visit</span> <span className="text-sm">{notVisitedCount}</span>
              </div>
-             <div className="bg-purple-100 border border-purple-300 text-purple-800 p-2 rounded-lg flex justify-between items-center">
+             <div className="bg-purple-50 border border-purple-200 text-purple-700 p-2 rounded-lg flex justify-between items-center">
                <span>Review</span> <span className="text-sm">{markedCount}</span>
              </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4">
-            <h3 className="text-xs font-black text-slate-800 mb-3 uppercase tracking-widest">Questions</h3>
+            <h3 className="text-xs font-black text-slate-800 mb-3 uppercase tracking-widest">Question Palette</h3>
             <div className="grid grid-cols-5 gap-2">
               {questions.map((_, i) => {
                 const isAnswered = questions[i].type === 'MSQ' ? (Array.isArray(answers[i]) && answers[i].length > 0) : (answers[i] !== undefined && answers[i] !== "");
@@ -642,10 +740,10 @@ export default function IframeStudentPlayer({ params }) {
                 const isCurrent = currentQIndex === i;
                 
                 let btnStyle = "bg-white border-slate-300 text-slate-500"; 
-                if (isVis && !isAnswered) btnStyle = "bg-rose-100 border-rose-400 text-rose-800"; 
-                if (isAnswered) btnStyle = "bg-emerald-500 border-emerald-600 text-white"; 
-                if (isMarked) btnStyle = "bg-purple-500 border-purple-600 text-white"; 
-                if (isMarked && isAnswered) btnStyle = "bg-purple-500 border-purple-600 text-white ring-2 ring-emerald-400 ring-offset-1"; 
+                if (isVis && !isAnswered) btnStyle = "bg-rose-100 border-rose-300 text-rose-700"; 
+                if (isAnswered) btnStyle = "bg-emerald-500 border-emerald-500 text-white"; 
+                if (isMarked) btnStyle = "bg-purple-500 border-purple-500 text-white"; 
+                if (isMarked && isAnswered) btnStyle = "bg-purple-600 border-purple-600 text-white shadow-[inset_0_-4px_0_0_#34d399]"; 
 
                 return (
                   <button 
@@ -662,8 +760,8 @@ export default function IframeStudentPlayer({ params }) {
             </div>
           </div>
 
-          <div className="p-4 border-t border-slate-200">
-            <button onClick={() => setShowSubmitConfirm(true)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-3.5 rounded-xl text-sm font-black shadow-lg transition uppercase tracking-widest flex items-center justify-center gap-2">
+          <div className="p-4 border-t border-slate-200 bg-white">
+            <button onClick={() => setShowSubmitConfirm(true)} className="w-full bg-slate-900 hover:bg-black text-white py-3.5 rounded-xl text-sm font-black shadow-lg transition uppercase tracking-widest flex items-center justify-center gap-2">
               <i className="fas fa-paper-plane"></i> Final Submit
             </button>
           </div>

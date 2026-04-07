@@ -65,9 +65,15 @@ export default function EducatorDashboard() {
             <button onClick={() => router.push('/educator/live-rooms')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
                 <i className="fas fa-door-open w-4"></i> Live Rooms
             </button>
+             {/* --- NEW AI EXAM GENERATOR BUTTON INSTALLED HERE --- */}
+            <button onClick={() => router.push('/educator/exam-generator')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
+                <i className="fas fa-brain w-4 text-fuchsia-400 group-hover:animate-pulse"></i> AI Exam Generator
+                <span className="ml-auto bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">New</span>
+            </button>
             <button onClick={() => router.push('/educator/quiz-poll')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
                 <i className="fas fa-bolt w-4"></i> Live Quiz Poll
             </button>
+            
         </nav>
         
         {/* --- FIXED: FULL USER PROFILE & SWITCH ROLE ADDED HERE --- */}

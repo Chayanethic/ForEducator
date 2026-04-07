@@ -3,7 +3,6 @@ import { GoogleAIFileManager } from "@google/generative-ai/server";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/firebase";
 import { collection, doc, setDoc } from "firebase/firestore";
-import { YoutubeTranscript } from 'youtube-transcript';
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -34,27 +33,63 @@ export async function POST(req) {
     } 
     else if (mode === "youtube") {
       const youtubeUrl = formData.get("youtubeUrl");
-      deckTitle = "YouTube Video Summary";
+      deckTitle = "YouTube Video"; 
+
       try {
-        const transcriptList = await YoutubeTranscript.fetchTranscript(youtubeUrl);
-        promptContext = transcriptList.map(t => t.text).join(" ");
+        // Fetch the ACTUAL YouTube video title (Free via oEmbed)
+        const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${youtubeUrl}&format=json`);
+        if (oembedRes.ok) {
+          const oembedData = await oembedRes.json();
+          deckTitle = oembedData.title.length > 60 ? oembedData.title.substring(0, 60) + "..." : oembedData.title;
+        }
+
+        // Fetch Transcript from TranscriptAPI 
+        const response = await fetch(`https://transcriptapi.com/api/v2/youtube/transcript?video_url=${encodeURIComponent(youtubeUrl)}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${process.env.TRANSCRIPT_API_KEY}`
+          }
+        });
+
+        const data = await response.json();
+
+        // Debug Logs
+        // console.log("====== YOUTUBE API (TranscriptAPI) ======");
+        // console.log("STATUS:", response.status);
+        // console.log("DATA PREVIEW:", JSON.stringify(data).substring(0, 150) + "...");
+        // console.log("=========================================");
+
+        if (!response.ok) throw new Error(data.message || "TranscriptAPI error");
+
+        // ⚡ SMART PARSING: Find the array wherever it is hidden ⚡
+        if (Array.isArray(data)) {
+          promptContext = data.map(t => t.text).join(" ");
+        } else if (data.transcript && Array.isArray(data.transcript)) {
+          promptContext = data.transcript.map(t => t.text).join(" ");
+        } else if (data.segments && Array.isArray(data.segments)) {
+          promptContext = data.segments.map(t => t.text).join(" ");
+        } else if (data.data && Array.isArray(data.data)) {
+          promptContext = data.data.map(t => t.text).join(" ");
+        } else {
+          console.error("Unknown Data Structure:", data);
+          throw new Error("Unrecognized format from TranscriptAPI.");
+        }
+
       } catch (err) {
-        throw new Error("Could not extract YouTube transcript. Ensure the video has closed captions.");
+        console.error("YouTube Error:", err);
+        throw new Error("Could not extract YouTube transcript. Credits may be empty or video lacks captions.");
       }
-    } 
-    else if (mode === "pdf") {
+    }    else if (mode === "pdf") {
       const file = formData.get("file");
       if (!file) throw new Error("No PDF file uploaded.");
       
       deckTitle = file.name.replace('.pdf', '');
       
-      // Save file temporarily to send to Google
       const tmpDir = os.tmpdir();
       filePath = path.join(tmpDir, `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, "_")}`);
       const buffer = Buffer.from(await file.arrayBuffer());
       fs.writeFileSync(filePath, buffer);
 
-      // Upload directly to Gemini to save server RAM
       const uploadResponse = await fileManager.uploadFile(filePath, {
         mimeType: "application/pdf",
         displayName: deckTitle,
@@ -103,7 +138,6 @@ export async function POST(req) {
     const flashcards = JSON.parse(rawJson);
 
     // --- 3. STRICT FIREBASE SAVING ---
-    // Pre-generate ID to avoid race conditions
     const newDeckRef = doc(collection(db, "flashcard_decks"));
     const deckId = newDeckRef.id;
 
@@ -116,7 +150,6 @@ export async function POST(req) {
       studentId: studentId
     });
 
-    // Wait for ALL cards to save before returning success
     const writePromises = flashcards.map((card, i) => {
       const cardRef = doc(db, "flashcard_decks", deckId, "cards", `card_${i}`);
       return setDoc(cardRef, {
@@ -128,14 +161,13 @@ export async function POST(req) {
     
     await Promise.all(writePromises);
 
-    // Clean up temp file
     if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
     return NextResponse.json({ success: true, deckId: deckId, title: deckTitle, count: flashcards.length });
 
   } catch (error) {
     console.error("Flashcard Generation Error:", error);
-    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath); // Cleanup on error
+    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath); 
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

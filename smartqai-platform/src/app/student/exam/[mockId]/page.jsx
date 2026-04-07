@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { useUser } from "@clerk/nextjs";
+import { useState, useEffect, use, useRef } from "react";
 import { doc, getDoc, collection, getDocs, addDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useUser } from "@clerk/nextjs";
+import { useParams, useRouter } from "next/navigation";
 
 // --- MATH RENDERING IMPORTS ---
 import 'katex/dist/katex.min.css';
@@ -211,53 +211,6 @@ export default function ExamInterface() {
     }
   }, [examPhase]);
 
-  // ⚡ ULTRA-FAST AI PROCTORING DETECTION LOOP (500ms) ⚡
-  useEffect(() => {
-    let isDetecting = true; // Control flag to prevent memory leaks
-
-    const runAiDetection = async () => {
-      if (!isDetecting || !isStrictProctoringActive || !isCameraActive || !aiModel || modal.show) return;
-
-      if (videoRef.current && videoRef.current.readyState >= 2) {
-        try {
-          const predictions = await aiModel.detect(videoRef.current);
-          
-          let personCount = 0;
-          let phoneDetected = false;
-
-          predictions.forEach(prediction => {
-            if (prediction.score > 0.45) {
-              if (prediction.class === 'person') personCount++;
-              if (prediction.class === 'cell phone') phoneDetected = true;
-            }
-          });
-
-          if (phoneDetected) {
-            handleViolation("AI Detection: Mobile Phone or unauthorized device detected");
-          } else if (personCount > 1) {
-            handleViolation("AI Detection: Multiple persons detected in camera frame");
-          }
-        } catch (error) {
-          console.error("Detection error:", error);
-        }
-      }
-
-      // Loop: Wait 500ms and run again safely
-      if (isDetecting) {
-        setTimeout(runAiDetection, 500);
-      }
-    };
-
-    // Kickstart the loop
-    if (isStrictProctoringActive && isCameraActive && aiModel && !modal.show) {
-      runAiDetection();
-    }
-
-    return () => {
-      isDetecting = false; 
-    };
-  }, [isStrictProctoringActive, isCameraActive, aiModel, modal.show]);
-
   // --- TAB SWITCH & SPLIT SCREEN DETECTION ---
   useEffect(() => {
     if (!isStrictProctoringActive || modal.show) return;
@@ -369,7 +322,6 @@ export default function ExamInterface() {
     const fetchExamAndProgress = async () => {
       if (!mockId) return;
       try {
-        // ⚡ FIX: Corrected collection name from "mocks" to "mock_exams"
         const mockRef = doc(db, "mock_exams", mockId);
         const mockSnap = await getDoc(mockRef);
         
@@ -383,7 +335,6 @@ export default function ExamInterface() {
         setMockDetails(mockData);
         const initialDurationSeconds = (mockData.duration || 60) * 60;
 
-        // ⚡ FIX: Corrected collection name from "mocks" to "mock_exams"
         const qRef = collection(db, "mock_exams", mockId, "questions");
         const qSnap = await getDocs(qRef);
         const fetchedQuestions = qSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -443,6 +394,74 @@ export default function ExamInterface() {
     }, 1000);
     return () => clearInterval(timer);
   }, [examPhase, questions.length, isSubmittingEngine]);
+
+  // ⚡ UPDATED AI PROCTORING LOOP (ULTRA FAST + BLOCKED CAMERA DETECTION) ⚡
+  useEffect(() => {
+    if (!isStrictProctoringActive || modal.show || !aiModel || !isCameraActive) return;
+
+    let isDetecting = true; // Prevents overlapping frames and memory leaks
+
+    const runAiDetection = async () => {
+      if (!isDetecting || modal.show) return;
+
+      if (videoRef.current && videoRef.current.readyState >= 2) {
+        try {
+          // 1. HIDDEN/BLOCKED CAMERA CHECK (Uses HTML5 Canvas to read pixel brightness)
+          const canvas = document.createElement("canvas");
+          canvas.width = 64; // Small resolution for rapid checking
+          canvas.height = 64;
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+          
+          const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          let colorSum = 0;
+          
+          for (let i = 0; i < pixels.length; i += 4) {
+              // Get average of RGB channels
+              colorSum += (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
+          }
+          const brightness = colorSum / (canvas.width * canvas.height);
+          
+          if (brightness < 12) { 
+            // If average pixel brightness is near black, camera is covered
+            handleViolation("Camera Obstructed: Please ensure your face is clearly visible.");
+          } else {
+            // 2. MOBILE PHONE & MULTIPLE PERSONS CHECK
+            const predictions = await aiModel.detect(videoRef.current);
+            let personCount = 0;
+            let phoneDetected = false;
+
+            predictions.forEach(prediction => {
+              if (prediction.score > 0.40) { // Aggressive threshold to catch split-second flashes
+                if (prediction.class === 'person') personCount++;
+                if (prediction.class === 'cell phone') phoneDetected = true;
+              }
+            });
+
+            if (phoneDetected) {
+              handleViolation("AI Detection: Mobile Phone or unauthorized device detected");
+            } else if (personCount > 1) {
+              handleViolation("AI Detection: Multiple persons detected in camera frame");
+            }
+          }
+        } catch (error) {
+          console.error("AI Detection error:", error);
+        }
+      }
+
+      // Loop recursively for ultra-fast, non-overlapping detection (300ms)
+      if (isDetecting) {
+        setTimeout(runAiDetection, 300);
+      }
+    };
+
+    // Kickstart the loop
+    runAiDetection();
+
+    return () => {
+      isDetecting = false; // Clean up
+    };
+  }, [isStrictProctoringActive, modal.show, aiModel, isCameraActive]);
 
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600);

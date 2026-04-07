@@ -332,37 +332,72 @@ export default function IframeStudentPlayer({ params }) {
     };
   }, [isStrictProctoringActive, isFinished, warningAlert.show]);
 
-  // AI Proctoring Loop
+  // ⚡ UPDATED AI PROCTORING LOOP (ULTRA FAST + BLOCKED CAMERA DETECTION) ⚡
   useEffect(() => {
     if (!isStrictProctoringActive || isFinished || warningAlert.show || !aiModel || !isCameraActive) return;
 
+    let isDetecting = true; // Prevents overlapping frames and memory leaks
+
     const runAiDetection = async () => {
+      if (!isDetecting || warningAlert.show) return;
+
       if (videoRef.current && videoRef.current.readyState >= 2) {
         try {
-          const predictions = await aiModel.detect(videoRef.current);
-          let personCount = 0;
-          let phoneDetected = false;
+          // 1. HIDDEN/BLOCKED CAMERA CHECK (Uses HTML5 Canvas to read pixel brightness)
+          const canvas = document.createElement("canvas");
+          canvas.width = 64; // Small resolution for rapid checking
+          canvas.height = 64;
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+          
+          const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          let colorSum = 0;
+          
+          for (let i = 0; i < pixels.length; i += 4) {
+              // Get average of RGB channels
+              colorSum += (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
+          }
+          const brightness = colorSum / (canvas.width * canvas.height);
+          
+          if (brightness < 12) { 
+            // If average pixel brightness is near black, camera is covered
+            issueWarning("Camera Obstructed: Please ensure your face is clearly visible.");
+          } else {
+            // 2. MOBILE PHONE & MULTIPLE PERSONS CHECK
+            const predictions = await aiModel.detect(videoRef.current);
+            let personCount = 0;
+            let phoneDetected = false;
 
-          predictions.forEach(prediction => {
-            if (prediction.score > 0.45) { 
-              if (prediction.class === 'person') personCount++;
-              if (prediction.class === 'cell phone') phoneDetected = true;
+            predictions.forEach(prediction => {
+              if (prediction.score > 0.40) { // Aggressive threshold to catch split-second flashes
+                if (prediction.class === 'person') personCount++;
+                if (prediction.class === 'cell phone') phoneDetected = true;
+              }
+            });
+
+            if (phoneDetected) {
+              issueWarning("AI Detection: Mobile Phone or unauthorized device detected");
+            } else if (personCount > 1) {
+              issueWarning("AI Detection: Multiple persons detected in camera frame");
             }
-          });
-
-          if (phoneDetected) {
-            issueWarning("AI Detection: Mobile Phone or unauthorized device detected");
-          } else if (personCount > 1) {
-            issueWarning("AI Detection: Multiple persons detected in camera frame");
           }
         } catch (error) {
           console.error("AI Detection error:", error);
         }
       }
+
+      // Loop recursively for ultra-fast, non-overlapping detection (300ms)
+      if (isDetecting) {
+        setTimeout(runAiDetection, 300);
+      }
     };
 
-    const detectionInterval = setInterval(runAiDetection, 2500); 
-    return () => clearInterval(detectionInterval);
+    // Kickstart the loop
+    runAiDetection();
+
+    return () => {
+      isDetecting = false; // Clean up
+    };
   }, [isStrictProctoringActive, isFinished, warningAlert.show, aiModel, isCameraActive]);
 
   // ==========================================
@@ -447,7 +482,6 @@ export default function IframeStudentPlayer({ params }) {
     setCurrentQIndex(index);
   };
 
-  // ⚡ UPDATED EXECUTE SUBMIT ⚡
   const submitExam = async (isForced = false) => {
     setIsFinished(true);
     setShowSubmitConfirm(false);
@@ -498,7 +532,6 @@ export default function IframeStudentPlayer({ params }) {
     const finalScoreFixed = score.toFixed(2);
 
     try {
-      // Note: Kept collection path consistent with your request structure
       await addDoc(collection(db, "mock_exams", mockId, "submissions"), {
         studentName: studentInfo.name?.trim() || "Student",
         studentEmail: studentInfo.email?.trim() || "No Email",
@@ -513,8 +546,6 @@ export default function IframeStudentPlayer({ params }) {
         answers
       });
 
-      // ⚡ FAIL-SAFE EMAIL API PAYLOAD ⚡
-      // This ensures we always pass safe strings, even if examData properties are occasionally undefined
       await fetch('/api/send-score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

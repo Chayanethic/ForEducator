@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useUser, useClerk } from "@clerk/nextjs";
+import { useUser, useClerk, useOrganizationList } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, limit, startAfter } from "firebase/firestore";
@@ -20,6 +20,9 @@ export default function StudentDashboard() {
   const { user, isLoaded, isSignedIn } = useUser();
   const { signOut } = useClerk(); 
   const router = useRouter();
+  
+  // ⚡ FIX: Added hook to handle Workspace Reset
+  const { setActive, isLoaded: isOrgListLoaded } = useOrganizationList();
 
   // --- UI & FEED STATE ---
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -66,6 +69,13 @@ export default function StudentDashboard() {
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
   const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // ⚡ FIX: Force Clerk into Personal Workspace (Solo Mode) on Load
+  useEffect(() => {
+    if (isOrgListLoaded && setActive) {
+      setActive({ organization: null });
+    }
+  }, [isOrgListLoaded, setActive]);
 
   useEffect(() => {
     const fetchPersonalData = async () => {

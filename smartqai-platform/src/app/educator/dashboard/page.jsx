@@ -1,20 +1,30 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useUser, useClerk } from "@clerk/nextjs";
+import { useUser, useClerk, useOrganizationList } from "@clerk/nextjs";
 import { collection, query, where, getDocs, orderBy, limit } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 export default function EducatorDashboard() {
-  const { user, isLoaded, isSignedIn } = useUser();
+  const { user, isLoaded: isUserLoaded, isSignedIn } = useUser();
   const { signOut } = useClerk();
   const router = useRouter();
+  
+  // ⚡ FIX: Added hook to handle Workspace Reset
+  const { setActive, isLoaded: isOrgListLoaded } = useOrganizationList();
   
   const [recentRooms, setRecentRooms] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // ⚡ FIX: Force Clerk into Personal Workspace (Solo Mode) on Load
+  useEffect(() => {
+    if (isOrgListLoaded && setActive) {
+      setActive({ organization: null });
+    }
+  }, [isOrgListLoaded, setActive]);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -29,11 +39,11 @@ export default function EducatorDashboard() {
         setIsLoading(false);
       }
     };
-    if (isLoaded && isSignedIn) fetchDashboardData();
-  }, [user, isLoaded, isSignedIn]);
+    if (isUserLoaded && isSignedIn) fetchDashboardData();
+  }, [user, isUserLoaded, isSignedIn]);
 
   // --- PREMIUM UPGRADE: BRANDED LOADING SCREEN ---
-  if (!isLoaded || isLoading) return (
+  if (!isUserLoaded || isLoading) return (
     <div className="flex h-screen items-center justify-center bg-slate-50 flex-col animate-in fade-in duration-500">
       <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-indigo-700 text-indigo-50 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-xl shadow-indigo-900/30 border border-indigo-400/30 transform -rotate-3 animate-pulse">
         <i className="fas fa-book-open-reader"></i>

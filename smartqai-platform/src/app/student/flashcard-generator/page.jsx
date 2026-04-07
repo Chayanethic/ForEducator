@@ -49,8 +49,9 @@ export default function FlashcardGenerator() {
   const [generatedDeck, setGeneratedDeck] = useState(null);
   const [error, setError] = useState("");
 
-  // --- RECENT DECKS STATE ---
-  const [recentDecks, setRecentDecks] = useState([]);
+  // --- DECKS STATE (Updated for "Show More" functionality) ---
+  const [allDecks, setAllDecks] = useState([]);
+  const [visibleCount, setVisibleCount] = useState(3);
   const [isLoadingDecks, setIsLoadingDecks] = useState(true);
 
   useEffect(() => {
@@ -71,7 +72,7 @@ export default function FlashcardGenerator() {
         });
 
         fetchedDecks.sort((a, b) => b.createdDate - a.createdDate);
-        setRecentDecks(fetchedDecks.slice(0, 3)); 
+        setAllDecks(fetchedDecks); // Store all fetched decks
       } catch (error) {
         console.error("Error fetching recent decks:", error);
       } finally {
@@ -150,10 +151,11 @@ export default function FlashcardGenerator() {
 
       setGeneratedDeck(newDeckObj);
 
-      setRecentDecks(prev => [
+      // Add the newly generated deck to the top of the list
+      setAllDecks(prev => [
         { id: data.deckId, title: data.title, cardCount: data.count, mode: inputMode, difficulty: difficulty, createdDate: new Date() },
         ...prev
-      ].slice(0, 3));
+      ]);
 
     } catch (err) {
       setError(err.message || "Failed to generate flashcards.");
@@ -470,47 +472,61 @@ export default function FlashcardGenerator() {
               <div className="flex items-center justify-center py-12">
                 <div className="w-6 h-6 border-2 border-slate-200 border-t-indigo-600 rounded-full animate-spin"></div>
               </div>
-            ) : recentDecks.length === 0 ? (
+            ) : allDecks.length === 0 ? (
               <div className="bg-white/50 border border-slate-200/50 rounded-2xl p-10 text-center">
                 <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center text-lg mx-auto mb-3"><i className="fas fa-archive"></i></div>
                 <h3 className="text-sm font-bold text-slate-700 mb-0.5">Your library is empty</h3>
                 <p className="text-slate-500 font-medium text-xs">Generate your first deck above.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                {recentDecks.map(deck => (
-                  <div 
-                    key={deck.id} 
-                    onClick={() => router.push(`/student/flashcards/${deck.id}`)} 
-                    className="bg-white border border-slate-200/80 rounded-2xl p-5 cursor-pointer hover:border-indigo-300 hover:shadow-md hover:-translate-y-1 transition-all duration-300 group flex flex-col h-full relative overflow-hidden"
-                  >
-                    <div className="absolute top-0 left-0 w-1 h-full bg-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                    
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="bg-slate-50 text-slate-500 border border-slate-200/60 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1.5 group-hover:bg-indigo-50 group-hover:text-indigo-600 group-hover:border-indigo-100 transition-colors">
-                        <i className="fas fa-copy text-[9px]"></i> {deck.cardCount} Cards
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  {allDecks.slice(0, visibleCount).map(deck => (
+                    <div 
+                      key={deck.id} 
+                      onClick={() => router.push(`/student/flashcards/${deck.id}`)} 
+                      className="bg-white border border-slate-200/80 rounded-2xl p-5 cursor-pointer hover:border-indigo-300 hover:shadow-md hover:-translate-y-1 transition-all duration-300 group flex flex-col h-full relative overflow-hidden"
+                    >
+                      <div className="absolute top-0 left-0 w-1 h-full bg-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                      
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="bg-slate-50 text-slate-500 border border-slate-200/60 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1.5 group-hover:bg-indigo-50 group-hover:text-indigo-600 group-hover:border-indigo-100 transition-colors">
+                          <i className="fas fa-copy text-[9px]"></i> {deck.cardCount} Cards
+                        </div>
+                        
+                        <div className="w-7 h-7 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-colors shadow-sm border border-slate-100 group-hover:border-indigo-600">
+                          <i className="fas fa-play text-[8px] ml-0.5"></i>
+                        </div>
                       </div>
                       
-                      <div className="w-7 h-7 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-colors shadow-sm border border-slate-100 group-hover:border-indigo-600">
-                        <i className="fas fa-play text-[8px] ml-0.5"></i>
+                      <h3 className="font-bold text-slate-800 text-sm leading-snug mb-4 group-hover:text-indigo-600 line-clamp-2 flex-1 transition-colors">
+                        {deck.title}
+                      </h3>
+                      
+                      <div className="flex items-center gap-2 pt-3 border-t border-slate-100/80">
+                        <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider bg-slate-100 px-1.5 py-0.5 rounded">
+                          {deck.mode}
+                        </div>
+                        <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                          {deck.difficulty}
+                        </div>
                       </div>
                     </div>
-                    
-                    <h3 className="font-bold text-slate-800 text-sm leading-snug mb-4 group-hover:text-indigo-600 line-clamp-2 flex-1 transition-colors">
-                      {deck.title}
-                    </h3>
-                    
-                    <div className="flex items-center gap-2 pt-3 border-t border-slate-100/80">
-                      <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider bg-slate-100 px-1.5 py-0.5 rounded">
-                        {deck.mode}
-                      </div>
-                      <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                        {deck.difficulty}
-                      </div>
-                    </div>
+                  ))}
+                </div>
+
+                {/* LOAD MORE BUTTON */}
+                {visibleCount < allDecks.length && (
+                  <div className="mt-8 flex justify-center animate-in fade-in duration-500">
+                    <button 
+                      onClick={() => setVisibleCount(prev => prev + 3)}
+                      className="bg-white hover:bg-indigo-50 text-indigo-600 border border-indigo-100 px-6 py-2.5 rounded-full text-xs font-bold transition-colors flex items-center gap-2 shadow-sm"
+                    >
+                      <i className="fas fa-chevron-down"></i> Load More ({allDecks.length - visibleCount} remaining)
+                    </button>
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
         </div>

@@ -13,7 +13,10 @@ export default function OrgDashboardPage() {
 
   const [recentExams, setRecentExams] = useState([]);
   const [isLoadingExams, setIsLoadingExams] = useState(true);
-  const [copiedId, setCopiedId] = useState(null);
+  
+  // ⚡ ADDED: Separate states for tracking which button was copied
+  const [copiedId, setCopiedId] = useState(null); // For Iframe Code
+  const [copiedLinkId, setCopiedLinkId] = useState(null); // For Direct Link
 
   // UI States
   const [examToDelete, setExamToDelete] = useState(null);
@@ -50,12 +53,22 @@ export default function OrgDashboardPage() {
     if (isLoaded && organization) fetchOrgExams();
   }, [isLoaded, organization]);
 
+  // Copy Iframe Code
   const copyIframeCode = (examId) => {
     const baseUrl = window.location.origin;
     const iframeCode = `<iframe \n  src="${baseUrl}/embed/exam/${examId}" \n  width="100%" \n  height="800px" \n  style="border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);" \n  allow="camera; microphone; fullscreen"\n></iframe>`;
     navigator.clipboard.writeText(iframeCode);
     setCopiedId(examId);
     setTimeout(() => setCopiedId(null), 3000);
+  };
+
+  // ⚡ ADDED: Function to copy direct exam link
+  const copyDirectLink = (examId) => {
+    const baseUrl = window.location.origin;
+    const directUrl = `${baseUrl}/embed/exam/${examId}`;
+    navigator.clipboard.writeText(directUrl);
+    setCopiedLinkId(examId);
+    setTimeout(() => setCopiedLinkId(null), 3000);
   };
 
   const confirmDeleteExam = async () => {
@@ -335,6 +348,12 @@ export default function OrgDashboardPage() {
                      {/* Action Buttons - Stacked on Mobile, Row on Desktop */}
                      <div className="flex flex-row flex-wrap lg:flex-nowrap items-center gap-2 md:gap-3 shrink-0 w-full lg:w-auto mt-2 lg:mt-0">
                        
+                       {/* ⚡ NEW DIRECT LINK BUTTON ⚡ */}
+                       <button onClick={() => copyDirectLink(exam.id)} className={`flex-1 lg:flex-none px-3 md:px-4 py-2.5 md:py-2.5 rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-2 border ${copiedLinkId === exam.id ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}>
+                         {copiedLinkId === exam.id ? <><i className="fas fa-check"></i> Copied Link</> : <><i className="fas fa-link"></i> Link</>}
+                       </button>
+
+                       {/* EXISTING EMBED BUTTON */}
                        <button onClick={() => copyIframeCode(exam.id)} className={`flex-1 lg:flex-none px-3 md:px-4 py-2.5 md:py-2.5 rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-2 border ${copiedId === exam.id ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}>
                          {copiedId === exam.id ? <><i className="fas fa-check"></i> Copied</> : <><i className="fas fa-code"></i> Embed</>}
                        </button>

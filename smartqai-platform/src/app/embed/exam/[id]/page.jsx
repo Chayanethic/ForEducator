@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect, use, useRef } from "react";
-import { doc, getDoc, collection, getDocs, addDoc } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs, addDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useUser } from "@clerk/nextjs";
+import { useParams, useRouter } from "next/navigation";
 
 // --- MATH RENDERING ---
 import 'katex/dist/katex.min.css';
@@ -99,6 +101,8 @@ export default function IframeStudentPlayer({ params }) {
   const unwrappedParams = use(params);
   const mockId = unwrappedParams.id;
   const playerRef = useRef(null); 
+  const router = useRouter();
+  const { user, isLoaded } = useUser();
 
   // Exam & Student Data
   const [examData, setExamData] = useState(null);
@@ -113,17 +117,24 @@ export default function IframeStudentPlayer({ params }) {
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(0);
   const [showCalculator, setShowCalculator] = useState(false);
+  const [examPhase, setExamPhase] = useState('loading'); 
+  const [isSubmittingEngine, setIsSubmittingEngine] = useState(false);
   
   // Tracking Matrices
   const [answers, setAnswers] = useState({});
   const [visited, setVisited] = useState({});
   const [markedForReview, setMarkedForReview] = useState({});
+  const [statuses, setStatuses] = useState([]); 
   
   // Security & UI Modal State
   const [warnings, setWarnings] = useState(0);
   const MAX_WARNINGS = 3;
   const [warningAlert, setWarningAlert] = useState({ show: false, reason: "", count: 0, isFinal: false });
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [toast, setToast] = useState({ show: false, message: "", type: "success" });
+
+  const [activeSection, setActiveSection] = useState("");
+  const [uniqueSections, setUniqueSections] = useState([]);
 
   // --- AI PROCTORING & CAMERA STATE ---
   const videoRef = useRef(null); 
@@ -132,6 +143,11 @@ export default function IframeStudentPlayer({ params }) {
   const [aiModel, setAiModel] = useState(null);
   const [isAiLoading, setIsAiLoading] = useState(true);
   const [isStrictProctoringActive, setIsStrictProctoringActive] = useState(false);
+
+  const showToast = (message, type = "success") => {
+    setToast({ show: true, message, type });
+    setTimeout(() => setToast({ show: false, message: "", type: "success" }), 3000);
+  };
 
   // 1. Fetch Exam Data
   useEffect(() => {
@@ -145,7 +161,26 @@ export default function IframeStudentPlayer({ params }) {
         setQuestions(data.questions);
         setTimeLeft(data.examData.duration * 60);
         
+        const sections = [...new Set(data.questions.map(q => q.section || "General"))];
+        setUniqueSections(sections);
+        if (sections.length > 0) setActiveSection(sections[0]);
+
+        const initialStatuses = Array(data.questions.length).fill('not-visited');
+        if (data.questions.length > 0) initialStatuses[0] = 'not-answered';
+        setStatuses(initialStatuses);
+        
         if (data.questions.length > 0) setVisited({ 0: true });
+
+        // Pre-fill if logged in
+        if (user) {
+          setStudentInfo({
+             name: user.fullName || "",
+             email: user.primaryEmailAddress?.emailAddress || "",
+             phone: ""
+          });
+        }
+
+        setExamPhase('instructions');
 
       } catch (error) {
         console.error("Error loading exam:", error);
@@ -153,8 +188,8 @@ export default function IframeStudentPlayer({ params }) {
         setIsLoading(false);
       }
     };
-    if (mockId) fetchExam();
-  }, [mockId]);
+    if (mockId && isLoaded) fetchExam();
+  }, [mockId, user, isLoaded]);
 
   // --- LOAD TENSORFLOW AI MODEL ---
   useEffect(() => {
@@ -209,21 +244,24 @@ export default function IframeStudentPlayer({ params }) {
 
   // 2. Timer Engine
   useEffect(() => {
-    if (!hasStarted || isFinished || timeLeft <= 0 || warningAlert.show) return;
+    if (!hasStarted || isFinished || timeLeft <= 0 || warningAlert.show || isSubmittingEngine) return;
     const timer = setInterval(() => {
       setTimeLeft(prev => {
-        if (prev <= 1) { submitExam(true); return 0; }
+        if (prev <= 1) { 
+          setIsSubmittingEngine(true);
+          submitExam(true); 
+          return 0; 
+        }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [hasStarted, isFinished, timeLeft, warningAlert.show]);
+  }, [hasStarted, isFinished, timeLeft, warningAlert.show, isSubmittingEngine]);
 
   // ==========================================
   // AGGRESSIVE ANTI-CHEAT ENGINE
   // ==========================================
 
-  // Universal Warning Dispatcher
   const issueWarning = (reason) => {
     setWarnings(prev => {
       const newWarnings = prev + 1;
@@ -237,7 +275,6 @@ export default function IframeStudentPlayer({ params }) {
     });
   };
 
-  // Grace Period: Don't trigger 'Window Focus Lost' during the initial Fullscreen transition
   useEffect(() => {
     if (hasStarted && !isFinished) {
       const timer = setTimeout(() => setIsStrictProctoringActive(true), 3000);
@@ -247,7 +284,6 @@ export default function IframeStudentPlayer({ params }) {
     }
   }, [hasStarted, isFinished]);
 
-  // Standard Listeners (Tabs, Focus, Shortcuts)
   useEffect(() => {
     if (!isStrictProctoringActive || isFinished || warningAlert.show) return;
 
@@ -304,13 +340,11 @@ export default function IframeStudentPlayer({ params }) {
       if (videoRef.current && videoRef.current.readyState >= 2) {
         try {
           const predictions = await aiModel.detect(videoRef.current);
-          console.log("AI Sight:", predictions); // Debugging: View in F12 console
-
           let personCount = 0;
           let phoneDetected = false;
 
           predictions.forEach(prediction => {
-            if (prediction.score > 0.45) { // 45% threshold to catch phones reliably
+            if (prediction.score > 0.45) { 
               if (prediction.class === 'person') personCount++;
               if (prediction.class === 'cell phone') phoneDetected = true;
             }
@@ -339,7 +373,6 @@ export default function IframeStudentPlayer({ params }) {
     e.preventDefault();
     setFormError(""); 
 
-    // ⚡ STRICT FORM VALIDATION ⚡
     if (!isCameraActive) {
       setFormError("You must grant camera permission to start the secure exam.");
       return;
@@ -380,6 +413,7 @@ export default function IframeStudentPlayer({ params }) {
       console.warn("Fullscreen API issue:", err);
     }
     setHasStarted(true);
+    setExamPhase('active');
   };
 
   const handleAnswerSelect = (optId) => {
@@ -413,9 +447,11 @@ export default function IframeStudentPlayer({ params }) {
     setCurrentQIndex(index);
   };
 
+  // ⚡ UPDATED EXECUTE SUBMIT ⚡
   const submitExam = async (isForced = false) => {
     setIsFinished(true);
     setShowSubmitConfirm(false);
+    setExamPhase('submitting');
     
     if (mediaStream) {
       mediaStream.getTracks().forEach(track => track.stop());
@@ -443,8 +479,10 @@ export default function IframeStudentPlayer({ params }) {
         if (q.type === 'MSQ') {
           const correctArr = Array.isArray(q.correctAnswer) ? q.correctAnswer : [];
           isRight = studentAns.length === correctArr.length && studentAns.every(v => correctArr.includes(v));
+        } else if (q.type === 'NAT') {
+          isRight = parseFloat(studentAns) === parseFloat(q.correctAnswer);
         } else {
-          isRight = studentAns === q.correctAnswer;
+          isRight = studentAns === q.correctAnswer || studentAns === q.correctOption;
         }
 
         if (isRight) {
@@ -460,11 +498,12 @@ export default function IframeStudentPlayer({ params }) {
     const finalScoreFixed = score.toFixed(2);
 
     try {
-      await addDoc(collection(db, "mocks", mockId, "submissions"), {
-        studentName: studentInfo.name.trim(),
-        studentEmail: studentInfo.email.trim(),
-        studentPhone: studentInfo.phone.trim(),
-        orgId: examData.orgId, 
+      // Note: Kept collection path consistent with your request structure
+      await addDoc(collection(db, "mock_exams", mockId, "submissions"), {
+        studentName: studentInfo.name?.trim() || "Student",
+        studentEmail: studentInfo.email?.trim() || "No Email",
+        studentPhone: studentInfo.phone?.trim() || "",
+        orgId: examData?.orgId || "N/A", 
         score: finalScoreFixed,
         totalMarks: totalMarks,
         correct, incorrect,
@@ -474,21 +513,25 @@ export default function IframeStudentPlayer({ params }) {
         answers
       });
 
+      // ⚡ FAIL-SAFE EMAIL API PAYLOAD ⚡
+      // This ensures we always pass safe strings, even if examData properties are occasionally undefined
       await fetch('/api/send-score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studentEmail: studentInfo.email.trim(),
-          studentName: studentInfo.name.trim(),
+          studentEmail: studentInfo.email?.trim() || user?.primaryEmailAddress?.emailAddress || "no-reply@test.com",
+          studentName: studentInfo.name?.trim() || user?.fullName || "Student",
           score: finalScoreFixed,
           totalMarks: totalMarks,
-          orgName: examData.orgName,
-          examTitle: examData.title
+          orgName: examData?.orgName || "OZONE Academy",
+          examTitle: examData?.title || "AI Mock Assessment"
         })
       });
 
     } catch (error) { 
       console.error("Failed to process submission:", error); 
+    } finally {
+      setExamPhase('submitted');
     }
   };
 
@@ -519,7 +562,7 @@ export default function IframeStudentPlayer({ params }) {
 
   // --- UI SCREENS ---
 
-  if (isLoading) return <div className="flex h-screen items-center justify-center bg-white"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>;
+  if (isLoading || examPhase === 'loading') return <div className="flex h-screen items-center justify-center bg-white"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>;
   if (!examData || questions.length === 0) return <div className="flex h-screen items-center justify-center bg-white text-slate-500 font-bold">This exam is unavailable.</div>;
 
   if (!hasStarted) {
@@ -533,7 +576,7 @@ export default function IframeStudentPlayer({ params }) {
                <div className="w-16 h-16 bg-indigo-500 text-white rounded-xl flex items-center justify-center text-3xl mx-auto mb-4 shadow-md"><i className="fas fa-building"></i></div>
             )}
             <h1 className="text-2xl font-black text-white mb-1">{examData.title}</h1>
-            <p className="text-slate-400 font-bold text-sm">Powered by {examData.orgName}</p>
+            <p className="text-slate-400 font-bold text-sm">Powered by {examData.orgName || "OZONE Academy"}</p>
           </div>
 
           <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -609,7 +652,7 @@ export default function IframeStudentPlayer({ params }) {
     );
   }
 
-  if (isFinished) {
+  if (examPhase === 'submitting' || examPhase === 'submitted') {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans relative overflow-hidden">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-emerald-400/20 rounded-full blur-[100px] animate-pulse pointer-events-none"></div>
@@ -617,10 +660,17 @@ export default function IframeStudentPlayer({ params }) {
         <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-emerald-900/5 max-w-lg w-full overflow-hidden border border-slate-100 relative z-10 animate-in fade-in zoom-in-95 duration-500">
           <div className="bg-slate-900 p-10 text-center relative overflow-hidden">
             <div className="absolute -right-10 -top-10 w-40 h-40 bg-emerald-500/20 rounded-full blur-2xl"></div>
-            <div className="w-20 h-20 bg-emerald-500/20 border-2 border-emerald-400 text-emerald-400 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-[0_0_30px_rgba(52,211,153,0.3)] animate-bounce" style={{ animationDuration: '2s' }}>
-              <i className="fas fa-check"></i>
-            </div>
-            <h2 className="text-3xl font-black text-white mb-2 tracking-tight">Assessment Complete</h2>
+            {examPhase === 'submitting' ? (
+              <div className="text-emerald-400 text-5xl mb-6 animate-spin flex justify-center"><i className="fas fa-circle-notch"></i></div>
+            ) : (
+              <div className="w-20 h-20 bg-emerald-500/20 border-2 border-emerald-400 text-emerald-400 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-[0_0_30px_rgba(52,211,153,0.3)] animate-bounce" style={{ animationDuration: '2s' }}>
+                <i className="fas fa-check"></i>
+              </div>
+            )}
+            
+            <h2 className="text-3xl font-black text-white mb-2 tracking-tight">
+              {examPhase === 'submitting' ? 'Submitting...' : 'Assessment Complete'}
+            </h2>
             <p className="text-emerald-300 font-medium text-sm">Secure session terminated.</p>
           </div>
           
@@ -640,22 +690,13 @@ export default function IframeStudentPlayer({ params }) {
                  </div>
               </div>
               <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                An automated diagnostic report has been dispatched to <strong className="text-slate-700">{studentInfo.email}</strong> by the {examData.orgName} team.
+                An automated diagnostic report has been dispatched to <strong className="text-slate-700">{studentInfo.email}</strong> by the {examData.orgName || "OZONE"} team.
               </p>
             </div>
 
             <button onClick={() => window.close()} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-4 rounded-xl font-black transition-colors border border-slate-200 shadow-sm flex items-center justify-center gap-2">
               <i className="fas fa-times-circle"></i> Close Tab
             </button>
-          </div>
-
-          <div className="bg-slate-50 border-t border-slate-100 p-5 text-center flex items-center justify-center gap-3">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Powered securely by</span>
-            {examData.orgLogo ? (
-               <img src={examData.orgLogo} alt="Logo" className="h-5 object-contain grayscale opacity-60" />
-            ) : (
-              <span className="text-xs font-black text-slate-600">{examData.orgName}</span>
-            )}
           </div>
         </div>
       </div>

@@ -99,7 +99,7 @@ const DraggableCalculator = ({ onClose }) => {
 
 export default function ExamInterface() {
   const params = useParams();
-  const mockId = params?.mockId || params?.['mock-id']; 
+  const mockId = params?.mockId || params?.['mock-id'] || params?.id; 
   const router = useRouter();
   const { user, isLoaded } = useUser();
 
@@ -131,7 +131,7 @@ export default function ExamInterface() {
   const [isSubmittingEngine, setIsSubmittingEngine] = useState(false);
 
   // --- SECURITY STATE & REFS ---
-  const videoRef = useRef(null); // Single visible video ref
+  const videoRef = useRef(null); 
   
   const [mediaStream, setMediaStream] = useState(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -204,7 +204,6 @@ export default function ExamInterface() {
   // --- ACTIVATE STRICT PROCTORING (WITH GRACE PERIOD) ---
   useEffect(() => {
     if (examPhase === 'active') {
-      // Wait 3 seconds before activating strict listeners to allow the browser to enter Fullscreen without triggering a false tab-switch alarm.
       const timer = setTimeout(() => setIsStrictProctoringActive(true), 3000);
       return () => clearTimeout(timer);
     } else {
@@ -212,27 +211,21 @@ export default function ExamInterface() {
     }
   }, [examPhase]);
 
-  // --- AI PROCTORING DETECTION LOOP ---
+  // ⚡ ULTRA-FAST AI PROCTORING DETECTION LOOP (500ms) ⚡
   useEffect(() => {
-    // Wait until strict proctoring is active to start logging violations
-    if (!isStrictProctoringActive || !isCameraActive || !aiModel || modal.show) return;
-
-    let detectionInterval;
+    let isDetecting = true; // Control flag to prevent memory leaks
 
     const runAiDetection = async () => {
-      // 2 = HAVE_CURRENT_DATA. Ensures video frame is ready to be analyzed.
+      if (!isDetecting || !isStrictProctoringActive || !isCameraActive || !aiModel || modal.show) return;
+
       if (videoRef.current && videoRef.current.readyState >= 2) {
         try {
           const predictions = await aiModel.detect(videoRef.current);
           
-          // Debugging log: Open Developer Tools to see what the AI sees
-          console.log("AI Sight:", predictions); 
-
           let personCount = 0;
           let phoneDetected = false;
 
           predictions.forEach(prediction => {
-            // Lowered threshold to 0.45 to catch phones easier
             if (prediction.score > 0.45) {
               if (prediction.class === 'person') personCount++;
               if (prediction.class === 'cell phone') phoneDetected = true;
@@ -248,11 +241,21 @@ export default function ExamInterface() {
           console.error("Detection error:", error);
         }
       }
+
+      // Loop: Wait 500ms and run again safely
+      if (isDetecting) {
+        setTimeout(runAiDetection, 500);
+      }
     };
 
-    // Scans every 2.5 seconds
-    detectionInterval = setInterval(runAiDetection, 2500); 
-    return () => clearInterval(detectionInterval);
+    // Kickstart the loop
+    if (isStrictProctoringActive && isCameraActive && aiModel && !modal.show) {
+      runAiDetection();
+    }
+
+    return () => {
+      isDetecting = false; 
+    };
   }, [isStrictProctoringActive, isCameraActive, aiModel, modal.show]);
 
   // --- TAB SWITCH & SPLIT SCREEN DETECTION ---
@@ -299,8 +302,8 @@ export default function ExamInterface() {
           hideCancel: true,
           confirmText: "Acknowledge",
           onConfirm: () => {
-             enterFullScreen();
-             setModal({ show: false, type: "" });
+              enterFullScreen();
+              setModal({ show: false, type: "" });
           }
         });
       }
@@ -754,7 +757,17 @@ export default function ExamInterface() {
               {isCameraActive && (
                 <div className="w-full md:w-64 shrink-0 bg-slate-900 rounded-xl overflow-hidden border-2 border-emerald-500 shadow-lg relative flex flex-col">
                    <div className="bg-slate-800 text-white text-xs font-bold text-center py-1">Live Camera Preview</div>
-                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-40 object-cover transform scale-x-[-1]"></video>
+                   {/* ⚡ FIXED: Auto-attach stream on the instruction screen ⚡ */}
+                   <video 
+                     ref={(el) => {
+                       if (el && mediaStream && el.srcObject !== mediaStream) {
+                         el.srcObject = mediaStream;
+                         videoRef.current = el; 
+                       }
+                     }} 
+                     autoPlay playsInline muted 
+                     className="w-full h-40 object-cover transform scale-x-[-1]"
+                   ></video>
                 </div>
               )}
             </div>
@@ -898,14 +911,17 @@ export default function ExamInterface() {
 
             {/* LARGER VISIBLE CAMERA FEED */}
             <div className="w-24 h-16 rounded overflow-hidden bg-black border-2 border-emerald-500 relative shadow-inner shadow-black/50">
-               {/* This is the exact video feed the AI model will scan */}
-               <video ref={(el) => {
-                 if (el && mediaStream && el.srcObject !== mediaStream) {
-                   el.srcObject = mediaStream;
-                   // Ensure videoRef is kept in sync for the AI model
-                   videoRef.current = el; 
-                 }
-               }} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]"></video>
+               {/* ⚡ ACTIVE EXAM FEED ⚡ */}
+               <video 
+                 ref={(el) => {
+                   if (el && mediaStream && el.srcObject !== mediaStream) {
+                     el.srcObject = mediaStream;
+                     videoRef.current = el; // Bind to TFJS ref
+                   }
+                 }} 
+                 autoPlay playsInline muted 
+                 className="w-full h-full object-cover transform scale-x-[-1]"
+               ></video>
                <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse shadow-rose-500 shadow-sm"></div>
             </div>
 

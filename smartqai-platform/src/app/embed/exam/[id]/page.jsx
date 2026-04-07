@@ -1,14 +1,16 @@
 "use client";
 
-import { useState, useEffect, use, useRef } from "react";
-import { doc, getDoc, collection, getDocs, addDoc } from "firebase/firestore";
+import { useState, useEffect, useRef } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useUser } from "@clerk/nextjs";
+import { doc, getDoc, collection, getDocs, addDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
-// --- MATH RENDERING ---
+// --- MATH RENDERING IMPORTS ---
 import 'katex/dist/katex.min.css';
 import Latex from 'react-latex-next';
 
-// --- DRAGGABLE TCS iON CALCULATOR COMPONENT ---
+// --- DRAGGABLE CALCULATOR COMPONENT ---
 const DraggableCalculator = ({ onClose }) => {
   const [position, setPosition] = useState({ x: 100, y: 100 });
   const [isDragging, setIsDragging] = useState(false);
@@ -95,7 +97,7 @@ const DraggableCalculator = ({ onClose }) => {
   );
 };
 
-export default function IframeStudentPlayer({ params }) {
+export default function OrgEmbeddedExamPlayer({ params }) {
   const unwrappedParams = use(params);
   const mockId = unwrappedParams.id;
   const playerRef = useRef(null); 
@@ -132,6 +134,11 @@ export default function IframeStudentPlayer({ params }) {
   const [aiModel, setAiModel] = useState(null);
   const [isAiLoading, setIsAiLoading] = useState(true);
   const [isStrictProctoringActive, setIsStrictProctoringActive] = useState(false);
+
+  const showToast = (message, type = "success") => {
+    // simplified mock toast logic for the embedded player
+    alert(message);
+  };
 
   // 1. Fetch Exam Data
   useEffect(() => {
@@ -190,13 +197,6 @@ export default function IframeStudentPlayer({ params }) {
       setFormError("Camera access is mandatory for this exam. Please allow it in your browser settings.");
     }
   };
-
-  // Keep Video Stream Attached to Ref
-  useEffect(() => {
-    if (videoRef.current && mediaStream && videoRef.current.srcObject !== mediaStream) {
-      videoRef.current.srcObject = mediaStream;
-    }
-  }, [mediaStream, hasStarted]);
 
   // Clean up Camera on unmount
   useEffect(() => {
@@ -296,21 +296,23 @@ export default function IframeStudentPlayer({ params }) {
     };
   }, [isStrictProctoringActive, isFinished, warningAlert.show]);
 
-  // AI Proctoring Loop
+  // ⚡ ULTRA-FAST AI PROCTORING LOOP (500ms) ⚡
   useEffect(() => {
-    if (!isStrictProctoringActive || isFinished || warningAlert.show || !aiModel || !isCameraActive) return;
+    let isDetecting = true; // Control flag to prevent state memory leaks
 
     const runAiDetection = async () => {
+      // Abort condition
+      if (!isDetecting || !isStrictProctoringActive || isFinished || warningAlert.show || !aiModel || !isCameraActive) return;
+
       if (videoRef.current && videoRef.current.readyState >= 2) {
         try {
           const predictions = await aiModel.detect(videoRef.current);
-          console.log("AI Sight:", predictions); // Debugging: View in F12 console
-
+          
           let personCount = 0;
           let phoneDetected = false;
 
           predictions.forEach(prediction => {
-            if (prediction.score > 0.45) { // 45% threshold to catch phones reliably
+            if (prediction.score > 0.45) { 
               if (prediction.class === 'person') personCount++;
               if (prediction.class === 'cell phone') phoneDetected = true;
             }
@@ -325,10 +327,23 @@ export default function IframeStudentPlayer({ params }) {
           console.error("AI Detection error:", error);
         }
       }
+      
+      // Recursive call: Wait 500ms AFTER the previous scan finishes. 
+      // This guarantees ultra-fast tracking without crashing the browser.
+      if (isDetecting) {
+        setTimeout(runAiDetection, 500); 
+      }
     };
 
-    const detectionInterval = setInterval(runAiDetection, 2500); 
-    return () => clearInterval(detectionInterval);
+    // Kickstart the lightning-fast loop
+    if (isStrictProctoringActive && !isFinished && !warningAlert.show) {
+      runAiDetection(); 
+    }
+
+    // Cleanup function when component unmounts or state changes
+    return () => {
+      isDetecting = false; 
+    };
   }, [isStrictProctoringActive, isFinished, warningAlert.show, aiModel, isCameraActive]);
 
   // ==========================================
@@ -560,7 +575,17 @@ export default function IframeStudentPlayer({ params }) {
                      <div className="absolute top-2 right-2 bg-emerald-500/20 backdrop-blur text-emerald-400 text-[10px] font-black uppercase px-2 py-1 rounded border border-emerald-500/50 z-10 flex items-center gap-1">
                        <i className="fas fa-video"></i> Active
                      </div>
-                     <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]"></video>
+                     {/* ⚡ FIXED: Auto-attach stream on the instruction screen ⚡ */}
+                     <video 
+                       ref={(el) => {
+                         if (el && mediaStream && el.srcObject !== mediaStream) {
+                           el.srcObject = mediaStream;
+                           videoRef.current = el; 
+                         }
+                       }} 
+                       autoPlay playsInline muted 
+                       className="w-full h-full object-cover transform scale-x-[-1]"
+                     ></video>
                   </div>
                 )}
 
@@ -765,12 +790,17 @@ export default function IframeStudentPlayer({ params }) {
 
           {/* TINY LIVE CAMERA PREVIEW IN HEADER */}
           <div className="w-16 h-10 rounded overflow-hidden bg-black border border-emerald-500 relative shadow-inner shadow-black/50">
-             <video ref={(el) => {
-               if (el && mediaStream && el.srcObject !== mediaStream) {
-                 el.srcObject = mediaStream;
-                 videoRef.current = el; // Bind to TFJS ref
-               }
-             }} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]"></video>
+             {/* ⚡ ACTIVE EXAM FEED ⚡ */}
+             <video 
+               ref={(el) => {
+                 if (el && mediaStream && el.srcObject !== mediaStream) {
+                   el.srcObject = mediaStream;
+                   videoRef.current = el; // Bind to TFJS ref
+                 }
+               }} 
+               autoPlay playsInline muted 
+               className="w-full h-full object-cover transform scale-x-[-1]"
+             ></video>
              <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse shadow-rose-500 shadow-sm"></div>
           </div>
 

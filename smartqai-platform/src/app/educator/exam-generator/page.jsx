@@ -5,7 +5,7 @@ import { useUser } from "@clerk/nextjs";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import jsPDF from "jspdf";
-import { doc, updateDoc } from "firebase/firestore";
+import { doc, updateDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 const LOADING_STEPS = [
@@ -48,6 +48,42 @@ export default function EducatorAIExamGenerator() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
 
+  // --- RECENT EXAMS STATE ---
+  const [recentExams, setRecentExams] = useState([]);
+  const [visibleCount, setVisibleCount] = useState(3);
+  const [isLoadingExams, setIsLoadingExams] = useState(true);
+
+  // Fetch Recent Exams on Load
+  useEffect(() => {
+    const fetchRecentExams = async () => {
+      if (!user?.id) return;
+      try {
+        const examsRef = collection(db, "mock_exams");
+        const qExams = query(examsRef, where("educatorId", "==", user.id));
+        const snap = await getDocs(qExams);
+        
+        let fetchedExams = snap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            createdDate: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt || Date.now())
+          };
+        });
+
+        // Sort latest first
+        fetchedExams.sort((a, b) => b.createdDate - a.createdDate);
+        setRecentExams(fetchedExams);
+      } catch (err) {
+        console.error("Error fetching recent exams:", err);
+      } finally {
+        setIsLoadingExams(false);
+      }
+    };
+
+    fetchRecentExams();
+  }, [user?.id]);
+
   // Cycle through loading messages
   useEffect(() => {
     let interval;
@@ -83,11 +119,10 @@ export default function EducatorAIExamGenerator() {
           difficulty,
           numQuestions: Number(numQuestions),
           duration: Number(duration),
-          // Defaulting to private/no calculator for the draft phase
           isPublic: false, 
           allowCalculator: false,
           educatorId: user?.id || "anonymous",
-          status: "draft" // Optional: if your backend supports draft statuses
+          status: "draft"
         })
       });
 
@@ -118,8 +153,6 @@ export default function EducatorAIExamGenerator() {
     setIsPublishing(true);
     
     try {
-      // Update the database with the final educator settings
-      // NOTE: Update "mock_exams" to match whatever collection name your API uses
       const examRef = doc(db, "mock_exams", generatedExam.mockId); 
       await updateDoc(examRef, {
         isPublic: isPublic,
@@ -127,10 +160,23 @@ export default function EducatorAIExamGenerator() {
         status: "published"
       });
 
-      setExamStep(3); // Move to Success Phase
+      // Add to recent exams state locally so it shows immediately
+      const newExamObj = {
+        id: generatedExam.mockId,
+        title: `${generatedExam.topic} Assessment`,
+        category: category,
+        difficulty: difficulty,
+        duration: duration,
+        totalQuestions: generatedExam.questions.length,
+        isPublic: isPublic,
+        status: "published",
+        createdDate: new Date()
+      };
+      
+      setRecentExams(prev => [newExamObj, ...prev]);
+      setExamStep(3); 
     } catch (err) {
       console.error("Publishing error:", err);
-      // Even if DB update fails (due to rules), let's move UI forward for UX demo purposes
       setExamStep(3); 
     } finally {
       setIsPublishing(false);
@@ -171,17 +217,21 @@ export default function EducatorAIExamGenerator() {
 
       doc.setFontSize(11);
       doc.setFont(undefined, "bold");
-      const splitQuestion = doc.splitTextToSize(`Q${index + 1}. ${q.text}`, pageWidth - 40);
+      const splitQuestion = doc.splitTextToSize(`Q${index + 1}. ${q.text || ""}`, pageWidth - 40);
       doc.text(splitQuestion, 20, yPos);
       yPos += (splitQuestion.length * 6) + 4;
 
       doc.setFont(undefined, "normal");
-      q.options.forEach(opt => {
-        if (yPos > 275) { doc.addPage(); yPos = 20; }
-        const splitOpt = doc.splitTextToSize(`${opt.id}) ${opt.text}`, pageWidth - 50);
-        doc.text(splitOpt, 25, yPos);
-        yPos += (splitOpt.length * 6) + 2;
-      });
+      
+      // FIX: Check if options exist before iterating (handles NAT questions)
+      if (q.options) {
+        q.options.forEach(opt => {
+          if (yPos > 275) { doc.addPage(); yPos = 20; }
+          const splitOpt = doc.splitTextToSize(`${opt.id}) ${opt.text}`, pageWidth - 50);
+          doc.text(splitOpt, 25, yPos);
+          yPos += (splitOpt.length * 6) + 2;
+        });
+      }
       
       if (q.correctAnswer) {
         doc.setTextColor(16, 185, 129);
@@ -199,7 +249,7 @@ export default function EducatorAIExamGenerator() {
   return (
     <div className="flex h-screen bg-slate-50 font-sans selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden">
       
-      
+
 
       {/* =========================================
           MAIN CONTENT AREA
@@ -228,8 +278,8 @@ export default function EducatorAIExamGenerator() {
         </header>
 
         {/* Main Workspace */}
-        <main className="flex-1 overflow-y-auto px-4 md:px-8 pb-20 relative z-10">
-          <div className="max-w-6xl mx-auto w-full">
+        <main className="flex-1 overflow-y-auto px-4 md:px-8 pb-20 relative z-10 flex flex-col items-center">
+          <div className="max-w-6xl w-full">
             
             {/* BACK TO DASHBOARD BUTTON */}
             <button 
@@ -466,13 +516,26 @@ export default function EducatorAIExamGenerator() {
                           {generatedExam.questions.map((q, i) => (
                             <div key={i} className="mb-5 pb-5 border-b border-slate-200 last:border-0 last:mb-0 last:pb-0">
                               <p className="font-bold text-slate-800 text-sm mb-3">Q{i + 1}. {q.text}</p>
-                              <div className="space-y-2 pl-4 border-l-2 border-slate-200">
-                                {q.options.map(opt => (
-                                  <p key={opt.id} className={`text-xs font-medium ${opt.id === q.correctAnswer ? 'text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md inline-block border border-emerald-100' : 'text-slate-500'}`}>
-                                    {opt.id}) {opt.text}
-                                  </p>
-                                ))}
-                              </div>
+                              
+                              {/* FIX: Check if options exist for non-NAT questions */}
+                              {q.options && (
+                                <div className="space-y-2 pl-4 border-l-2 border-slate-200">
+                                  {q.options.map(opt => (
+                                    <p key={opt.id} className={`text-xs font-medium ${opt.id === q.correctAnswer ? 'text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md inline-block border border-emerald-100' : 'text-slate-500'}`}>
+                                      {opt.id}) {opt.text}
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
+                              
+                              {/* Show answer for NAT types */}
+                              {!q.options && (
+                                <div className="pl-4 border-l-2 border-emerald-200 mt-2">
+                                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md">
+                                    Answer: {q.correctAnswer}
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -661,6 +724,85 @@ export default function EducatorAIExamGenerator() {
               </div>
 
             </div>
+
+            {/* =========================================
+                HIGHLIGHTED RECENT EXAMS SECTION
+            ========================================= */}
+            <div className="w-full mt-20 pb-10 relative z-10 animate-in fade-in duration-700 delay-300">
+              <div className="bg-white border-t border-slate-200 pt-10">
+                <div className="flex justify-between items-center mb-8 px-2">
+                  <h2 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-3">
+                    <i className="fas fa-layer-group text-indigo-500"></i> Your Published Exams
+                  </h2>
+                </div>
+                
+                {isLoadingExams ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="w-8 h-8 border-4 border-slate-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                  </div>
+                ) : recentExams.length === 0 ? (
+                  <div className="bg-slate-50 border border-slate-200/50 rounded-2xl p-12 text-center">
+                    <div className="w-16 h-16 bg-slate-200 text-slate-400 rounded-full flex items-center justify-center text-2xl mx-auto mb-4"><i className="fas fa-archive"></i></div>
+                    <h3 className="text-base font-bold text-slate-700 mb-1">Your library is empty</h3>
+                    <p className="text-slate-500 font-medium text-sm">Generate your first mock assessment above.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-2">
+                      {recentExams.slice(0, visibleCount).map(exam => (
+                        <div 
+                          key={exam.id} 
+                          onClick={() => router.push(`/educator/mocks/${exam.id}`)} 
+                          className="bg-white border-2 border-slate-100 rounded-2xl p-6 cursor-pointer hover:border-indigo-300 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group flex flex-col h-full relative overflow-hidden"
+                        >
+                          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-400 to-violet-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                          
+                          <div className="flex items-center justify-between mb-5">
+                            <div className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest ${exam.isPublic ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-amber-50 text-amber-600 border border-amber-200'}`}>
+                              {exam.isPublic ? 'Public' : 'Private'}
+                            </div>
+                            
+                            <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-colors border border-slate-200 group-hover:border-indigo-600">
+                              <i className="fas fa-arrow-right text-[10px]"></i>
+                            </div>
+                          </div>
+                          
+                          <h3 className="font-black text-slate-800 text-lg leading-snug mb-2 group-hover:text-indigo-600 transition-colors">
+                            {exam.title || `${exam.topic} Exam`}
+                          </h3>
+                          
+                          <p className="text-xs text-slate-500 font-bold mb-6 line-clamp-1">
+                            <i className="fas fa-folder text-slate-300 mr-1"></i> {exam.category}
+                          </p>
+                          
+                          <div className="flex items-center gap-3 pt-4 border-t border-slate-100 mt-auto">
+                            <div className="text-[10px] font-black text-slate-600 bg-slate-100 px-2 py-1 rounded flex items-center gap-1.5">
+                              <i className="fas fa-list-ol text-indigo-400"></i> {exam.totalQuestions} Qs
+                            </div>
+                            <div className="text-[10px] font-black text-slate-600 bg-slate-100 px-2 py-1 rounded flex items-center gap-1.5">
+                              <i className="fas fa-stopwatch text-amber-400"></i> {exam.duration}m
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* LOAD MORE BUTTON */}
+                    {visibleCount < recentExams.length && (
+                      <div className="mt-10 flex justify-center animate-in fade-in duration-500">
+                        <button 
+                          onClick={() => setVisibleCount(prev => prev + 3)}
+                          className="bg-white hover:bg-indigo-50 text-indigo-600 border border-slate-200 hover:border-indigo-200 px-8 py-3 rounded-full text-sm font-bold transition-colors flex items-center gap-2 shadow-sm"
+                        >
+                          <i className="fas fa-chevron-down"></i> Load More ({recentExams.length - visibleCount} remaining)
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
           </div>
         </main>
       </div>

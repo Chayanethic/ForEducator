@@ -369,7 +369,8 @@ export default function ExamInterface() {
     const fetchExamAndProgress = async () => {
       if (!mockId) return;
       try {
-        const mockRef = doc(db, "mocks", mockId);
+        // ⚡ FIX: Corrected collection name from "mocks" to "mock_exams"
+        const mockRef = doc(db, "mock_exams", mockId);
         const mockSnap = await getDoc(mockRef);
         
         if (!mockSnap.exists()) {
@@ -382,7 +383,8 @@ export default function ExamInterface() {
         setMockDetails(mockData);
         const initialDurationSeconds = (mockData.duration || 60) * 60;
 
-        const qRef = collection(db, "mocks", mockId, "questions");
+        // ⚡ FIX: Corrected collection name from "mocks" to "mock_exams"
+        const qRef = collection(db, "mock_exams", mockId, "questions");
         const qSnap = await getDocs(qRef);
         const fetchedQuestions = qSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setQuestions(fetchedQuestions);

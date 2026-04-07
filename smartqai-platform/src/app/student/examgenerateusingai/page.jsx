@@ -5,6 +5,8 @@ import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import jsPDF from "jspdf";
+import { collection, query, where, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 const LOADING_STEPS = [
   "Initializing Gemini 2.5 Flash...",
@@ -34,6 +36,39 @@ export default function AIExamGenerator() {
   const [loadingStep, setLoadingStep] = useState(0);
   const [generatedExam, setGeneratedExam] = useState(null);
   const [error, setError] = useState("");
+
+  // --- RECENT EXAMS STATE ---
+  const [recentExams, setRecentExams] = useState([]);
+  const [isLoadingRecent, setIsLoadingRecent] = useState(true);
+  const [downloadingPdfId, setDownloadingPdfId] = useState(null);
+
+  // Fetch recent exams function
+  const fetchRecentExams = async () => {
+    if (!user?.id) return;
+    setIsLoadingRecent(true);
+    try {
+      const q = query(
+        collection(db, "mock_exams"),
+        where("educatorId", "==", user.id)
+      );
+      const snap = await getDocs(q);
+      const exams = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      exams.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      setRecentExams(exams.slice(0, 6)); // Keep 6 most recent
+    } catch (err) {
+      console.error("Failed to fetch recent exams:", err);
+    } finally {
+      setIsLoadingRecent(false);
+    }
+  };
+
+  // Load recent exams on mount
+  useEffect(() => {
+    if (user?.id) {
+      fetchRecentExams();
+    }
+  }, [user?.id]);
 
   // Cycle through loading messages
   useEffect(() => {
@@ -91,6 +126,9 @@ export default function AIExamGenerator() {
         duration: duration
       });
 
+      // Refresh recent exams so the new one appears immediately
+      fetchRecentExams();
+
     } catch (err) {
       setError(err.message);
     } finally {
@@ -98,9 +136,30 @@ export default function AIExamGenerator() {
     }
   };
 
+  // PDF Generator for newly created exam
   const downloadPDF = () => {
     if (!generatedExam) return;
-    
+    generatePDFDocument(generatedExam.topic, difficulty, duration, generatedExam.questions);
+  };
+
+  // PDF Downloader for Recent Exams (Fetches questions from Firebase)
+  const downloadRecentPDF = async (exam) => {
+    setDownloadingPdfId(exam.id);
+    try {
+      const qSnap = await getDocs(collection(db, "mock_exams", exam.id, "questions"));
+      const questions = qSnap.docs.map(doc => doc.data()).sort((a, b) => a.order - b.order);
+      
+      generatePDFDocument(exam.topic || "Exam", exam.difficulty || "Medium", exam.duration || 60, questions);
+    } catch (err) {
+      console.error("Error generating PDF:", err);
+      alert("Failed to download PDF. Please try again.");
+    } finally {
+      setDownloadingPdfId(null);
+    }
+  };
+
+  // Reusable PDF Generation Logic
+  const generatePDFDocument = (examTopic, examDifficulty, examDuration, questionsList) => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     
@@ -110,7 +169,7 @@ export default function AIExamGenerator() {
     
     doc.setFontSize(10);
     doc.setTextColor(100, 116, 139);
-    doc.text(`TOPIC: ${generatedExam.topic.toUpperCase()}   |   DIFFICULTY: ${difficulty.toUpperCase()}   |   TIME: ${duration} MINS`, pageWidth / 2, 28, { align: "center" });
+    doc.text(`TOPIC: ${examTopic.toUpperCase()}   |   DIFFICULTY: ${examDifficulty.toUpperCase()}   |   TIME: ${examDuration} MINS`, pageWidth / 2, 28, { align: "center" });
     
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.5);
@@ -119,7 +178,7 @@ export default function AIExamGenerator() {
     let yPos = 45;
     doc.setTextColor(15, 23, 42);
 
-    generatedExam.questions.forEach((q, index) => {
+    questionsList.forEach((q, index) => {
       if (yPos > 260) { doc.addPage(); yPos = 20; }
 
       doc.setFontSize(11);
@@ -129,17 +188,27 @@ export default function AIExamGenerator() {
       yPos += (splitQuestion.length * 6) + 4;
 
       doc.setFont(undefined, "normal");
-      q.options.forEach(opt => {
+      
+      if (q.options && Array.isArray(q.options) && q.options.length > 0) {
+        q.options.forEach(opt => {
+          if (yPos > 275) { doc.addPage(); yPos = 20; }
+          const splitOpt = doc.splitTextToSize(`${opt.id}) ${opt.text}`, pageWidth - 50);
+          doc.text(splitOpt, 25, yPos);
+          yPos += (splitOpt.length * 6) + 2;
+        });
+      } else {
         if (yPos > 275) { doc.addPage(); yPos = 20; }
-        const splitOpt = doc.splitTextToSize(`${opt.id}) ${opt.text}`, pageWidth - 50);
-        doc.text(splitOpt, 25, yPos);
-        yPos += (splitOpt.length * 6) + 2;
-      });
+        doc.setTextColor(148, 163, 184); 
+        doc.text("[Numerical Answer Type - No Options]", 25, yPos);
+        doc.setTextColor(15, 23, 42); 
+        yPos += 8;
+      }
+      
       yPos += 8; 
     });
 
-    doc.save(`OZONE_${generatedExam.topic.replace(/\s+/g, '_')}_Exam.pdf`);
-  };
+    doc.save(`OZONE_${examTopic.replace(/\s+/g, '_')}_Exam.pdf`);
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans flex flex-col overflow-hidden relative selection:bg-indigo-100 selection:text-indigo-900">
@@ -164,7 +233,7 @@ export default function AIExamGenerator() {
       </header>
 
       {/* Main Workspace */}
-      <main className="flex-1 overflow-y-auto px-4 md:px-8 pb-12 flex items-center justify-center relative z-10">
+      <main className="flex-1 overflow-y-auto px-4 md:px-8 pb-12 flex flex-col items-center relative z-10">
         <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
           
           {/* =========================================
@@ -203,10 +272,11 @@ export default function AIExamGenerator() {
 
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                   <button 
+                    // ⚡ FIX: Corrected route to /student/exam/[id] and changed text to "Take Test"
                     onClick={() => router.push(`/student/exam/${generatedExam.mockId}`)}
                     className="flex-1 bg-gradient-to-r from-indigo-600 to-violet-600 text-white py-4 rounded-xl font-bold hover:shadow-lg hover:shadow-indigo-600/30 hover:-translate-y-1 transition-all flex justify-center items-center gap-2"
                   >
-                    Start Live Exam <i className="fas fa-arrow-right text-xs"></i>
+                    Take Test <i className="fas fa-arrow-right text-xs"></i>
                   </button>
                   <button 
                     onClick={downloadPDF}
@@ -459,6 +529,93 @@ export default function AIExamGenerator() {
           </div>
 
         </div>
+
+        {/* =========================================
+            BOTTOM SECTION: RECENT EXAMS GRID
+        ========================================= */}
+        <div className="max-w-6xl w-full mt-16 z-10 relative">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-600 shadow-sm">
+              <i className="fas fa-history"></i>
+            </div>
+            <h3 className="text-2xl font-black text-slate-800">Recent Assessments</h3>
+          </div>
+
+          {isLoadingRecent ? (
+             <div className="flex justify-center items-center py-12">
+               <i className="fas fa-circle-notch fa-spin text-indigo-500 text-3xl"></i>
+             </div>
+          ) : recentExams.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {recentExams.map(exam => {
+                const dateObj = exam.createdAt?.seconds 
+                  ? new Date(exam.createdAt.seconds * 1000) 
+                  : new Date();
+                
+                return (
+                  <div key={exam.id} className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 hover:shadow-xl hover:border-indigo-300 transition-all duration-300 group flex flex-col h-full">
+                    <div className="flex justify-between items-start mb-4">
+                      <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+                        exam.difficulty === 'Expert' ? 'bg-rose-100 text-rose-700' :
+                        exam.difficulty === 'Intermediate' ? 'bg-amber-100 text-amber-700' :
+                        'bg-emerald-100 text-emerald-700'
+                      }`}>
+                        {exam.difficulty}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-400 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
+                        {dateObj.toLocaleDateString()}
+                      </span>
+                    </div>
+                    
+                    <h4 className="font-bold text-slate-800 text-lg mb-2 line-clamp-2 leading-tight group-hover:text-indigo-600 transition-colors">
+                      {exam.title}
+                    </h4>
+                    
+                    <div className="flex items-center gap-4 text-sm font-medium text-slate-500 mb-6 mt-auto">
+                      <span className="flex items-center gap-1.5"><i className="fas fa-list-ol text-slate-400"></i> {exam.totalQuestions || 0} Qs</span>
+                      <span className="flex items-center gap-1.5"><i className="fas fa-clock text-slate-400"></i> {exam.duration || 0} Mins</span>
+                    </div>
+                    
+                    {/* ⚡ FIX: Adjusted Route and Button Text */}
+                   
+<div className="flex gap-2 mt-auto">
+  <button 
+    onClick={() => router.push(`/student/exam/${exam.id}`)}
+    className="flex-1 flex justify-center items-center gap-1 text-center bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white py-3 rounded-xl text-sm font-bold transition-all border border-indigo-100 hover:border-indigo-600 shadow-sm"
+  >
+    Take Test <i className="fas fa-play text-xs opacity-70"></i>
+  </button>
+                      
+                      <button 
+                        onClick={() => downloadRecentPDF(exam)}
+                        disabled={downloadingPdfId === exam.id}
+                        className="flex-1 flex justify-center items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 py-3 rounded-xl text-sm font-bold transition-all border border-slate-200 shadow-sm disabled:opacity-50"
+                      >
+                        {downloadingPdfId === exam.id ? (
+                          <i className="fas fa-circle-notch fa-spin text-indigo-500"></i>
+                        ) : (
+                          <><i className="fas fa-file-pdf text-rose-500"></i> PDF</>
+                        )}
+                      </button>
+                    </div>
+
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="bg-white/60 backdrop-blur-sm border-2 border-slate-200 border-dashed rounded-3xl p-12 text-center flex flex-col items-center justify-center shadow-sm">
+              <div className="w-16 h-16 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center text-2xl mb-4">
+                <i className="fas fa-folder-open"></i>
+              </div>
+              <h4 className="text-lg font-bold text-slate-700 mb-1">No Recent Exams</h4>
+              <p className="text-slate-500 text-sm max-w-sm">
+                You haven't generated any AI assessments yet. Use the engine above to create your first mock exam.
+              </p>
+            </div>
+          )}
+        </div>
+
       </main>
     </div>
   );

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useState, useEffect, useRef, use } from "react";
+import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { doc, getDoc, collection, getDocs, addDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -97,71 +97,60 @@ const DraggableCalculator = ({ onClose }) => {
   );
 };
 
+// ⚡ ONLY ONE EXPORT DEFAULT FUNCTION ⚡
 export default function OrgEmbeddedExamPlayer({ params }) {
+  // Extract ID securely for Next.js 15+
   const unwrappedParams = use(params);
-  const mockId = unwrappedParams.id;
-  const playerRef = useRef(null); 
+  const mockId = unwrappedParams?.id || unwrappedParams?.mockId || unwrappedParams?.['mock-id']; 
+  
+  const router = useRouter();
+  const { user, isLoaded } = useUser();
 
-  // Exam & Student Data
-  const [examData, setExamData] = useState(null);
+  const [mockDetails, setMockDetails] = useState(null);
   const [questions, setQuestions] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  
+  const [examPhase, setExamPhase] = useState('loading'); 
+  const [hasAcceptedRules, setHasAcceptedRules] = useState(false);
   const [studentInfo, setStudentInfo] = useState({ name: "", email: "", phone: "" });
-  const [formError, setFormError] = useState(""); 
   
-  // Exam Engine State
-  const [hasStarted, setHasStarted] = useState(false);
-  const [isFinished, setIsFinished] = useState(false);
-  const [currentQIndex, setCurrentQIndex] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(0);
-  const [showCalculator, setShowCalculator] = useState(false);
+  const [modal, setModal] = useState({ 
+    show: false, type: "", title: "", message: "", 
+    confirmText: "OK", onConfirm: null, 
+    cancelText: "Cancel", onCancel: null, 
+    hideCancel: false, dangerCancel: false 
+  });
   
-  // Tracking Matrices
-  const [answers, setAnswers] = useState({});
-  const [visited, setVisited] = useState({});
-  const [markedForReview, setMarkedForReview] = useState({});
-  
-  // Security & UI Modal State
-  const [warnings, setWarnings] = useState(0);
-  const MAX_WARNINGS = 3;
-  const [warningAlert, setWarningAlert] = useState({ show: false, reason: "", count: 0, isFinal: false });
-  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [toast, setToast] = useState({ show: false, message: "", type: "success" });
 
-  // --- AI PROCTORING & CAMERA STATE ---
+  const [activeSection, setActiveSection] = useState("");
+  const [uniqueSections, setUniqueSections] = useState([]);
+
+  const [currentIndex, setCurrentIndex] = useState(0); 
+  const [answers, setAnswers] = useState({}); 
+  const [statuses, setStatuses] = useState([]); 
+  const [timeLeft, setTimeLeft] = useState(3600); 
+  
+  const [showCalculator, setShowCalculator] = useState(false);
+  const containerRef = useRef(null);
+  const [isSubmittingEngine, setIsSubmittingEngine] = useState(false);
+
+  // --- SECURITY STATE & REFS ---
   const videoRef = useRef(null); 
   const [mediaStream, setMediaStream] = useState(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [violationCount, setViolationCount] = useState(0);
+
+  // This flag prevents false "Window Blur" alarms during the fullscreen transition
+  const [isStrictProctoringActive, setIsStrictProctoringActive] = useState(false); 
+
+  // --- AI PROCTORING STATE ---
   const [aiModel, setAiModel] = useState(null);
   const [isAiLoading, setIsAiLoading] = useState(true);
-  const [isStrictProctoringActive, setIsStrictProctoringActive] = useState(false);
 
   const showToast = (message, type = "success") => {
-    // simplified mock toast logic for the embedded player
-    alert(message);
+    setToast({ show: true, message, type });
+    setTimeout(() => setToast({ show: false, message: "", type: "success" }), 3000);
   };
-
-  // 1. Fetch Exam Data
-  useEffect(() => {
-    const fetchExam = async () => {
-      try {
-        const res = await fetch(`/api/exam/${mockId}`);
-        if (!res.ok) throw new Error("Exam not found or server error");
-        
-        const data = await res.json();
-        setExamData(data.examData);
-        setQuestions(data.questions);
-        setTimeLeft(data.examData.duration * 60);
-        
-        if (data.questions.length > 0) setVisited({ 0: true });
-
-      } catch (error) {
-        console.error("Error loading exam:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    if (mockId) fetchExam();
-  }, [mockId]);
 
   // --- LOAD TENSORFLOW AI MODEL ---
   useEffect(() => {
@@ -175,7 +164,7 @@ export default function OrgEmbeddedExamPlayer({ params }) {
         setIsAiLoading(false);
       } catch (error) {
         console.error("Error loading AI Proctoring model:", error);
-        setFormError("Failed to load AI Engine. Exam cannot start.");
+        showToast("Failed to load AI Engine. Exam cannot start.", "error");
       }
     };
     loadAiModel();
@@ -186,19 +175,23 @@ export default function OrgEmbeddedExamPlayer({ params }) {
     if (e) e.preventDefault();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }, 
+        video: { 
+          width: { ideal: 640 }, 
+          height: { ideal: 480 },
+          facingMode: "user" 
+        }, 
         audio: false 
       });
       setMediaStream(stream);
       setIsCameraActive(true);
-      setFormError(""); 
+      showToast("Camera accessed securely.", "success");
     } catch (err) {
       console.error("Camera access denied:", err);
-      setFormError("Camera access is mandatory for this exam. Please allow it in your browser settings.");
+      showToast("Camera access is mandatory for this exam. Please allow it in your browser settings.", "error");
     }
   };
 
-  // Clean up Camera on unmount
+  // --- CLEANUP CAMERA ON UNMOUNT ---
   useEffect(() => {
     return () => {
       if (mediaStream) {
@@ -207,102 +200,22 @@ export default function OrgEmbeddedExamPlayer({ params }) {
     };
   }, [mediaStream]);
 
-  // 2. Timer Engine
+  // --- ACTIVATE STRICT PROCTORING (WITH GRACE PERIOD) ---
   useEffect(() => {
-    if (!hasStarted || isFinished || timeLeft <= 0 || warningAlert.show) return;
-    const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) { submitExam(true); return 0; }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [hasStarted, isFinished, timeLeft, warningAlert.show]);
-
-  // ==========================================
-  // AGGRESSIVE ANTI-CHEAT ENGINE
-  // ==========================================
-
-  // Universal Warning Dispatcher
-  const issueWarning = (reason) => {
-    setWarnings(prev => {
-      const newWarnings = prev + 1;
-      if (newWarnings >= MAX_WARNINGS) {
-        setWarningAlert({ show: true, reason, count: newWarnings, isFinal: true });
-        setTimeout(() => submitExam(true), 3000); 
-      } else {
-        setWarningAlert({ show: true, reason, count: newWarnings, isFinal: false });
-      }
-      return newWarnings;
-    });
-  };
-
-  // Grace Period: Don't trigger 'Window Focus Lost' during the initial Fullscreen transition
-  useEffect(() => {
-    if (hasStarted && !isFinished) {
+    if (examPhase === 'active') {
       const timer = setTimeout(() => setIsStrictProctoringActive(true), 3000);
       return () => clearTimeout(timer);
     } else {
       setIsStrictProctoringActive(false);
     }
-  }, [hasStarted, isFinished]);
+  }, [examPhase]);
 
-  // Standard Listeners (Tabs, Focus, Shortcuts)
+  // ⚡ ULTRA-FAST AI PROCTORING DETECTION LOOP (500ms) ⚡
   useEffect(() => {
-    if (!isStrictProctoringActive || isFinished || warningAlert.show) return;
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) issueWarning("Tab switching detected");
-    };
-
-    const handleBlur = () => {
-      issueWarning("Window focus lost (Possible split-screen or external app clicked)");
-    };
-
-    const handleFullscreenChange = () => {
-      if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
-        issueWarning("Exited full screen mode");
-      }
-    };
-
-    const handleKeyDown = (e) => {
-      if (e.key === 'PrintScreen' || e.keyCode === 44) {
-        navigator.clipboard.writeText(''); 
-        issueWarning("Screenshot attempt detected");
-        e.preventDefault();
-      }
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'v' || e.key === 'p')) e.preventDefault();
-      if (e.key === 'F12' || ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'I')) e.preventDefault();
-    };
-
-    const preventAction = (e) => e.preventDefault();
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("blur", handleBlur);
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    document.addEventListener("webkitfullscreenchange", handleFullscreenChange); 
-    document.addEventListener("keydown", handleKeyDown);
-    document.addEventListener("contextmenu", preventAction);
-    document.addEventListener("copy", preventAction);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("blur", handleBlur);
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
-      document.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("contextmenu", preventAction);
-      document.removeEventListener("copy", preventAction);
-    };
-  }, [isStrictProctoringActive, isFinished, warningAlert.show]);
-
-  // ⚡ ULTRA-FAST AI PROCTORING LOOP (500ms) ⚡
-  useEffect(() => {
-    let isDetecting = true; // Control flag to prevent state memory leaks
+    let isDetecting = true; // Control flag to prevent memory leaks
 
     const runAiDetection = async () => {
-      // Abort condition
-      if (!isDetecting || !isStrictProctoringActive || isFinished || warningAlert.show || !aiModel || !isCameraActive) return;
+      if (!isDetecting || !isStrictProctoringActive || !isCameraActive || !aiModel || modal.show) return;
 
       if (videoRef.current && videoRef.current.readyState >= 2) {
         try {
@@ -312,664 +225,943 @@ export default function OrgEmbeddedExamPlayer({ params }) {
           let phoneDetected = false;
 
           predictions.forEach(prediction => {
-            if (prediction.score > 0.45) { 
+            if (prediction.score > 0.45) {
               if (prediction.class === 'person') personCount++;
               if (prediction.class === 'cell phone') phoneDetected = true;
             }
           });
 
           if (phoneDetected) {
-            issueWarning("AI Detection: Mobile Phone or unauthorized device detected");
+            handleViolation("AI Detection: Mobile Phone or unauthorized device detected");
           } else if (personCount > 1) {
-            issueWarning("AI Detection: Multiple persons detected in camera frame");
+            handleViolation("AI Detection: Multiple persons detected in camera frame");
           }
         } catch (error) {
-          console.error("AI Detection error:", error);
+          console.error("Detection error:", error);
         }
       }
-      
-      // Recursive call: Wait 500ms AFTER the previous scan finishes. 
-      // This guarantees ultra-fast tracking without crashing the browser.
+
+      // Loop: Wait 500ms and run again safely
       if (isDetecting) {
-        setTimeout(runAiDetection, 500); 
+        setTimeout(runAiDetection, 500);
       }
     };
 
-    // Kickstart the lightning-fast loop
-    if (isStrictProctoringActive && !isFinished && !warningAlert.show) {
-      runAiDetection(); 
+    // Kickstart the loop
+    if (isStrictProctoringActive && isCameraActive && aiModel && !modal.show) {
+      runAiDetection();
     }
 
-    // Cleanup function when component unmounts or state changes
     return () => {
       isDetecting = false; 
     };
-  }, [isStrictProctoringActive, isFinished, warningAlert.show, aiModel, isCameraActive]);
+  }, [isStrictProctoringActive, isCameraActive, aiModel, modal.show]);
 
-  // ==========================================
-  // EXAM CONTROLS & FORM VALIDATION
-  // ==========================================
+  // --- TAB SWITCH & SPLIT SCREEN DETECTION ---
+  useEffect(() => {
+    if (!isStrictProctoringActive || modal.show) return;
 
-  const startSecureExam = (e) => {
-    e.preventDefault();
-    setFormError(""); 
+    const handleVisibilityChange = () => {
+      if (document.hidden) handleViolation("Tab Switch Detected");
+    };
 
-    // ⚡ STRICT FORM VALIDATION ⚡
-    if (!isCameraActive) {
-      setFormError("You must grant camera permission to start the secure exam.");
-      return;
-    }
-    if (isAiLoading) {
-      setFormError("Please wait for the AI Security Engine to load.");
-      return;
-    }
+    const handleBlur = () => {
+      handleViolation("Window Lost Focus / Split Screen Detected");
+    };
 
-    const { name, email, phone } = studentInfo;
-    if (name.trim().length < 3) {
-      setFormError("Please enter your full, real name.");
-      return;
-    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleBlur);
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email.trim())) {
-      setFormError("Please enter a valid email address (e.g., student@gmail.com).");
-      return;
-    }
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [isStrictProctoringActive, modal.show]);
 
-    const phoneClean = phone.replace(/\D/g, ''); 
-    if (phoneClean.length < 10 || phoneClean.length > 15) {
-      setFormError("Please enter a valid 10-digit mobile number.");
-      return;
-    }
-
-    const elem = playerRef.current || document.documentElement;
-    try {
-      if (elem.requestFullscreen) {
-        elem.requestFullscreen().catch(err => console.warn(err));
-      } else if (elem.webkitRequestFullscreen) {
-        elem.webkitRequestFullscreen();
-      } else if (elem.msRequestFullscreen) {
-        elem.msRequestFullscreen();
+  const handleViolation = (reason) => {
+    setViolationCount(prev => {
+      const newCount = prev + 1;
+      
+      if (newCount >= 3) {
+        setModal({
+          show: true,
+          type: "warning",
+          title: "Exam Terminated",
+          message: "You have exceeded the maximum number of security violations. Your exam is being submitted automatically.",
+          hideCancel: true,
+          confirmText: "Close",
+          onConfirm: () => executeSubmit()
+        });
+      } else {
+        setModal({
+          show: true,
+          type: "warning",
+          title: "Security Violation Logged",
+          message: `${reason}. Please return to the exam environment immediately. Strike ${newCount} of 3.`,
+          hideCancel: true,
+          confirmText: "Acknowledge",
+          onConfirm: () => {
+              enterFullScreen();
+              setModal({ show: false, type: "" });
+          }
+        });
       }
-    } catch (err) {
-      console.warn("Fullscreen API issue:", err);
-    }
-    setHasStarted(true);
-  };
-
-  const handleAnswerSelect = (optId) => {
-    const q = questions[currentQIndex];
-    if (q.type === 'MSQ') {
-      let currentAns = answers[currentQIndex] || [];
-      if (!Array.isArray(currentAns)) currentAns = [];
-      const newAns = currentAns.includes(optId) ? currentAns.filter(id => id !== optId) : [...currentAns, optId];
-      setAnswers({ ...answers, [currentQIndex]: newAns });
-    } else {
-      setAnswers({ ...answers, [currentQIndex]: optId });
-    }
-  };
-
-  const handleNatInput = (val) => {
-    setAnswers({ ...answers, [currentQIndex]: val });
-  };
-
-  const clearResponse = () => {
-    const newAnswers = { ...answers };
-    delete newAnswers[currentQIndex];
-    setAnswers(newAnswers);
-  };
-
-  const toggleReview = () => {
-    setMarkedForReview(prev => ({ ...prev, [currentQIndex]: !prev[currentQIndex] }));
-  };
-
-  const navigateTo = (index) => {
-    setVisited(prev => ({ ...prev, [index]: true }));
-    setCurrentQIndex(index);
-  };
-
-  const submitExam = async (isForced = false) => {
-    setIsFinished(true);
-    setShowSubmitConfirm(false);
-    
-    if (mediaStream) {
-      mediaStream.getTracks().forEach(track => track.stop());
-    }
-
-    if (document.fullscreenElement || document.webkitFullscreenElement) {
-      if (document.exitFullscreen) {
-        document.exitFullscreen().catch(e => console.log(e));
-      } else if (document.webkitExitFullscreen) {
-        document.webkitExitFullscreen();
-      }
-    }
-
-    let score = 0;
-    let correct = 0;
-    let incorrect = 0;
-    const totalMarks = questions.reduce((acc, q) => acc + Number(q.marks || 2), 0);
-
-    questions.forEach((q, i) => {
-      const studentAns = answers[i];
-      const isAttempted = q.type === 'MSQ' ? (Array.isArray(studentAns) && studentAns.length > 0) : (studentAns !== undefined && studentAns !== "");
-
-      if (isAttempted) {
-        let isRight = false;
-        if (q.type === 'MSQ') {
-          const correctArr = Array.isArray(q.correctAnswer) ? q.correctAnswer : [];
-          isRight = studentAns.length === correctArr.length && studentAns.every(v => correctArr.includes(v));
-        } else {
-          isRight = studentAns === q.correctAnswer;
-        }
-
-        if (isRight) {
-          score += Number(q.marks || 2);
-          correct++;
-        } else {
-          score -= Number(q.negativeMarks || 0.66);
-          incorrect++;
-        }
-      }
+      return newCount;
     });
+  };
 
-    const finalScoreFixed = score.toFixed(2);
+  const triggerExitWarning = () => {
+    if (!isStrictProctoringActive || modal.show) return;
+    handleViolation("Exited Fullscreen Mode");
+  };
 
-    try {
-      await addDoc(collection(db, "mocks", mockId, "submissions"), {
-        studentName: studentInfo.name.trim(),
-        studentEmail: studentInfo.email.trim(),
-        studentPhone: studentInfo.phone.trim(),
-        orgId: examData.orgId, 
-        score: finalScoreFixed,
-        totalMarks: totalMarks,
-        correct, incorrect,
-        unattempted: questions.length - (correct + incorrect),
-        warnings, forcedSubmit: isForced,
-        submittedAt: new Date(),
-        answers
-      });
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (examPhase === 'active') {
+        e.preventDefault();
+        e.returnValue = 'Are you sure you want to leave? Your exam is in progress.';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [examPhase]);
 
-      await fetch('/api/send-score', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          studentEmail: studentInfo.email.trim(),
-          studentName: studentInfo.name.trim(),
-          score: finalScoreFixed,
-          totalMarks: totalMarks,
-          orgName: examData.orgName,
-          examTitle: examData.title
-        })
-      });
+  useEffect(() => {
+    const handleFullScreenChange = () => {
+      if (!document.fullscreenElement && examPhase === 'active') {
+        triggerExitWarning();
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFullScreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
+  }, [examPhase, isStrictProctoringActive]);
 
-    } catch (error) { 
-      console.error("Failed to process submission:", error); 
+  useEffect(() => {
+    if (examPhase === 'active') {
+      window.history.pushState(null, null, window.location.href);
+      const handlePopState = () => {
+        window.history.pushState(null, null, window.location.href);
+        exitFullScreen(); 
+        triggerExitWarning(); 
+      };
+      window.addEventListener('popstate', handlePopState);
+      return () => window.removeEventListener('popstate', handlePopState);
+    }
+  }, [examPhase, isStrictProctoringActive]);
+
+  const enterFullScreen = () => {
+    const elem = document.documentElement;
+    if (elem.requestFullscreen) elem.requestFullscreen();
+    else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+    else if (elem.msRequestFullscreen) elem.msRequestFullscreen();
+  };
+
+  const exitFullScreen = () => {
+    if (document.fullscreenElement) {
+      if (document.exitFullscreen) document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      else if (document.msExitFullscreen) document.msExitFullscreen();
     }
   };
+
+  useEffect(() => {
+    const fetchExamAndProgress = async () => {
+      if (!mockId) return;
+      try {
+        const mockRef = doc(db, "mocks", mockId); // Check your DB collection name
+        const mockSnap = await getDoc(mockRef);
+        
+        if (!mockSnap.exists()) {
+          showToast("Exam not found!", "error");
+          return;
+        }
+        
+        const mockData = { id: mockSnap.id, ...mockSnap.data() };
+        setMockDetails(mockData);
+        const initialDurationSeconds = (mockData.duration || 60) * 60;
+
+        const qRef = collection(db, "mocks", mockId, "questions");
+        const qSnap = await getDocs(qRef);
+        const fetchedQuestions = qSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setQuestions(fetchedQuestions);
+        
+        const sections = [...new Set(fetchedQuestions.map(q => q.section || "General"))];
+        setUniqueSections(sections);
+        if (sections.length > 0) setActiveSection(sections[0]);
+
+        const initialStatuses = Array(fetchedQuestions.length).fill('not-visited');
+        if (fetchedQuestions.length > 0) initialStatuses[0] = 'not-answered';
+
+        if (user) {
+          // Pre-fill user data if signed in
+          setStudentInfo({
+             name: user.fullName || "",
+             email: user.primaryEmailAddress?.emailAddress || "",
+             phone: ""
+          });
+
+          const progressRef = doc(db, "progress", `${user.id}_${mockId}`);
+          const progressSnap = await getDoc(progressRef);
+          
+          if (progressSnap.exists() && !progressSnap.data().isSubmitted) {
+            const savedData = progressSnap.data();
+            setAnswers(savedData.answers || {});
+            setStatuses(savedData.statuses || initialStatuses);
+            setTimeLeft(savedData.timeLeft || initialDurationSeconds);
+          } else {
+            setStatuses(initialStatuses);
+            setTimeLeft(initialDurationSeconds);
+          }
+        } else {
+          setStatuses(initialStatuses);
+          setTimeLeft(initialDurationSeconds);
+        }
+
+        setExamPhase('instructions');
+        
+      } catch (error) {
+        console.error("Error fetching exam:", error);
+        showToast("Error loading exam.", "error");
+      }
+    };
+
+    if (mockId && isLoaded) fetchExamAndProgress();
+  }, [mockId, user, isLoaded]);
+
+  useEffect(() => {
+    if (examPhase !== 'active' || questions.length === 0 || isSubmittingEngine) return;
+    
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          if (!isSubmittingEngine) {
+             setIsSubmittingEngine(true);
+             handleAutoSubmit(); 
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [examPhase, questions.length, isSubmittingEngine]);
 
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = seconds % 60;
-    return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s < 10 ? '0' : ''}${s}s`;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // --- STATUS CALCULATIONS ---
-  const totalQs = questions.length;
-  let answeredCount = 0;
-  let notAnsweredCount = 0;
-  let markedCount = 0;
-  let notVisitedCount = 0;
+  const saveProgressToCloud = async (newAnswers, newStatuses) => {
+    if (user && mockDetails) {
+      const progressRef = doc(db, "progress", `${user.id}_${mockId}`);
+      await setDoc(progressRef, {
+        studentId: user.id, mockId: mockId, mockTitle: mockDetails.title,
+        answers: newAnswers, statuses: newStatuses, timeLeft: timeLeft,
+        lastUpdated: new Date(), isSubmitted: false
+      }, { merge: true });
+    }
+  };
 
-  questions.forEach((q, i) => {
-    const isAnswered = q.type === 'MSQ' ? (Array.isArray(answers[i]) && answers[i].length > 0) : (answers[i] !== undefined && answers[i] !== "");
-    const isMarked = markedForReview[i];
-    const isVisited = visited[i];
+  const handleStartExam = (e) => {
+    if (e) e.preventDefault();
+    if (!hasAcceptedRules || !isCameraActive || isAiLoading) return;
+    
+    const { name, email, phone } = studentInfo;
+    if (name.trim().length < 3) return showToast("Please enter your full name.", "error");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return showToast("Please enter a valid email.", "error");
+    
+    enterFullScreen();
+    setExamPhase('active');
+  };
 
-    if (!isVisited) notVisitedCount++;
-    else if (isMarked) markedCount++; 
-    else if (isAnswered) answeredCount++;
-    else notAnsweredCount++;
-  });
+  const navigateQuestion = (targetIndex, forcedCurrentStatus = null) => {
+    setStatuses(prevStatuses => {
+      const updated = [...prevStatuses];
+      const currentQType = questions[currentIndex]?.type || 'MCQ';
 
-  // --- UI SCREENS ---
+      if (forcedCurrentStatus) {
+         updated[currentIndex] = forcedCurrentStatus;
+      } else {
+         if (updated[currentIndex] !== 'marked' && updated[currentIndex] !== 'answered-marked') {
+            updated[currentIndex] = checkHasAnswer(answers, currentIndex, currentQType) ? 'answered' : 'not-answered';
+         }
+      }
 
-  if (isLoading) return <div className="flex h-screen items-center justify-center bg-white"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>;
-  if (!examData || questions.length === 0) return <div className="flex h-screen items-center justify-center bg-white text-slate-500 font-bold">This exam is unavailable.</div>;
+      if (updated[targetIndex] === 'not-visited') {
+         updated[targetIndex] = 'not-answered';
+      }
 
-  if (!hasStarted) {
+      saveProgressToCloud(answers, updated);
+      return updated;
+    });
+
+    setCurrentIndex(targetIndex);
+    const nextSection = questions[targetIndex].section || "General";
+    if (nextSection !== activeSection) setActiveSection(nextSection);
+  };
+
+  const handleSectionTabClick = (sec) => {
+    if (sec === activeSection) return;
+    const firstQuestionIndex = questions.findIndex(q => (q.section || "General") === sec);
+    if (firstQuestionIndex !== -1) navigateQuestion(firstQuestionIndex, null);
+  };
+
+  const checkHasAnswer = (ansObj, index, qType) => {
+    const ans = ansObj[index];
+    if (ans === undefined || ans === null) return false;
+    if (qType === 'MSQ' && Array.isArray(ans)) return ans.length > 0;
+    return String(ans).trim() !== '';
+  };
+
+  const handleAnswerChange = (val, type) => {
+    const newAnswers = { ...answers };
+    if (type === 'MSQ') {
+      const currentAns = Array.isArray(newAnswers[currentIndex]) ? newAnswers[currentIndex] : [];
+      if (currentAns.includes(val)) {
+        newAnswers[currentIndex] = currentAns.filter(item => item !== val);
+      } else {
+        newAnswers[currentIndex] = [...currentAns, val];
+      }
+    } else {
+      newAnswers[currentIndex] = val;
+    }
+    
+    setAnswers(newAnswers);
+
+    setStatuses(prev => {
+      const updated = [...prev];
+      const hasAns = checkHasAnswer(newAnswers, currentIndex, type);
+      if (updated[currentIndex] === 'marked' || updated[currentIndex] === 'answered-marked') {
+        updated[currentIndex] = hasAns ? 'answered-marked' : 'marked';
+      } else {
+        updated[currentIndex] = hasAns ? 'answered' : 'not-answered';
+      }
+      saveProgressToCloud(newAnswers, updated);
+      return updated;
+    });
+  };
+
+  const clearResponse = () => {
+    const newAnswers = { ...answers };
+    delete newAnswers[currentIndex];
+    setAnswers(newAnswers);
+    
+    setStatuses(prev => {
+      const updated = [...prev];
+      updated[currentIndex] = 'not-answered';
+      saveProgressToCloud(newAnswers, updated);
+      return updated;
+    });
+  };
+
+  const saveAndNext = () => {
+    const currentQType = questions[currentIndex]?.type || 'MCQ';
+    const newStatus = checkHasAnswer(answers, currentIndex, currentQType) ? 'answered' : 'not-answered';
+    
+    const currentSectionQs = questions.map((q, i) => ({...q, globalIdx: i})).filter(q => (q.section || "General") === activeSection);
+    const isLastInSection = currentSectionQs[currentSectionQs.length - 1].globalIdx === currentIndex;
+
+    if (isLastInSection) {
+      const sectionIdx = uniqueSections.indexOf(activeSection);
+      if (sectionIdx < uniqueSections.length - 1) {
+        const nextSecName = uniqueSections[sectionIdx + 1];
+        const firstInNext = questions.findIndex(q => (q.section || "General") === nextSecName);
+        navigateQuestion(firstInNext, newStatus);
+      } else {
+         navigateQuestion(currentIndex, newStatus); 
+      }
+    } else {
+      if (currentIndex < questions.length - 1) navigateQuestion(currentIndex + 1, newStatus);
+    }
+  };
+
+  const markAndNext = () => {
+    const currentQType = questions[currentIndex]?.type || 'MCQ';
+    const newStatus = checkHasAnswer(answers, currentIndex, currentQType) ? 'answered-marked' : 'marked';
+    
+    const currentSectionQs = questions.map((q, i) => ({...q, globalIdx: i})).filter(q => (q.section || "General") === activeSection);
+    const isLastInSection = currentSectionQs[currentSectionQs.length - 1].globalIdx === currentIndex;
+
+    if (isLastInSection) {
+      const sectionIdx = uniqueSections.indexOf(activeSection);
+      if (sectionIdx < uniqueSections.length - 1) {
+        const nextSecName = uniqueSections[sectionIdx + 1];
+        const firstInNext = questions.findIndex(q => (q.section || "General") === nextSecName);
+        navigateQuestion(firstInNext, newStatus);
+      } else {
+         navigateQuestion(currentIndex, newStatus); 
+      }
+    } else {
+      if (currentIndex < questions.length - 1) navigateQuestion(currentIndex + 1, newStatus);
+    }
+  };
+
+  const triggerSubmitConfirmation = () => {
+    let answeredCount = 0;
+    questions.forEach((q, idx) => {
+      if (checkHasAnswer(answers, idx, q.type)) answeredCount++;
+    });
+    
+    const unattempted = questions.length - answeredCount;
+    setModal({
+      show: true,
+      type: "confirm",
+      title: "Submit Exam?",
+      message: `You have answered ${answeredCount} questions and left ${unattempted} unattempted. Are you sure you want to submit?`,
+      confirmText: "Yes, Submit Exam",
+      cancelText: "Resume Exam",
+      hideCancel: false,
+      dangerCancel: false,
+      onConfirm: () => {
+        setModal({ show: false });
+        executeSubmit();
+      },
+      onCancel: () => setModal({ show: false })
+    });
+  };
+
+  const handleAutoSubmit = () => {
+    setModal({
+      show: true,
+      type: "info",
+      title: "Time's Up!",
+      message: "The duration of the exam has elapsed. Your responses are being automatically submitted.",
+      confirmText: "View Results",
+      hideCancel: true,
+      onConfirm: () => executeSubmit()
+    });
+  };
+
+  const executeSubmit = async (isForced = false) => {
+    setExamPhase('submitting');
+    exitFullScreen();
+    
+    if (mediaStream) {
+       mediaStream.getTracks().forEach(track => track.stop());
+    }
+    
+    try {
+      let score = 0; let correct = 0; let incorrect = 0;
+      
+      questions.forEach((q, index) => {
+        const hasAns = checkHasAnswer(answers, index, q.type);
+        if (hasAns) {
+          let isCorrect = false;
+          const studentAns = answers[index];
+          
+          if (q.type === 'MSQ') {
+            const correctArr = Array.isArray(q.correctAnswer) ? q.correctAnswer : [];
+            const studentArr = Array.isArray(studentAns) ? studentAns : [];
+            if (correctArr.length === studentArr.length && correctArr.every(val => studentArr.includes(val))) {
+              isCorrect = true;
+            }
+          } else if (q.type === 'NAT') {
+            isCorrect = parseFloat(studentAns) === parseFloat(q.correctAnswer);
+          } else {
+            isCorrect = studentAns === q.correctAnswer || studentAns === q.correctOption;
+          }
+
+          if (isCorrect) { 
+            score += Number(q.marks) || 2; 
+            correct++; 
+          } else { 
+            score -= Number(q.negativeMarks) || 0.66; 
+            incorrect++; 
+          }
+        }
+      });
+
+      const finalScore = parseFloat(score.toFixed(2));
+      const totalMarks = questions.reduce((acc, q) => acc + Number(q.marks || 2), 0);
+
+      await addDoc(collection(db, "results"), {
+        studentId: user?.id || "anonymous", 
+        studentName: studentInfo.name || user?.fullName || "Student",
+        studentEmail: studentInfo.email || user?.primaryEmailAddress?.emailAddress || "No Email", 
+        studentPhone: studentInfo.phone || "",
+        mockId: mockId, 
+        examTitle: mockDetails?.title || "Exam", 
+        score: finalScore,
+        totalMarks: totalMarks,
+        correct, 
+        incorrect, 
+        unattempted: questions.length - (correct + incorrect),
+        violations: violationCount,
+        submittedAt: new Date(), 
+        answers 
+      });
+
+      if (user) {
+        const progressRef = doc(db, "progress", `${user.id}_${mockId}`);
+        await setDoc(progressRef, { isSubmitted: true }, { merge: true });
+      }
+
+      setExamPhase('submitted');
+    } catch (error) {
+      console.error("Error submitting exam:", error);
+      showToast("Failed to submit exam.", "error");
+      setExamPhase('active');
+    }
+  };
+
+  const getPaletteClass = (status) => {
+    switch (status) {
+      case 'answered': return 'bg-emerald-500 text-white clip-answered border-emerald-600';
+      case 'not-answered': return 'bg-rose-500 text-white clip-not-answered border-rose-600';
+      case 'marked': return 'bg-indigo-600 text-white rounded-full border-indigo-700';
+      case 'answered-marked': return 'bg-indigo-600 text-white rounded-full relative after:absolute after:bottom-0 after:right-0 after:w-2.5 after:h-2.5 after:bg-emerald-400 after:rounded-full after:border-2 after:border-white';
+      default: return 'bg-slate-100 text-slate-700 border border-slate-300 rounded-md'; 
+    }
+  };
+
+  const getStatusCount = (targetStatus) => statuses.filter(s => s === targetStatus).length;
+
+  if (examPhase === 'loading' || !isLoaded) return <div className="flex h-screen items-center justify-center bg-slate-50"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>;
+  if (questions.length === 0) return <div className="p-10 text-center">No questions found for this exam.</div>;
+
+  if (examPhase === 'instructions') {
     return (
-      <div className="min-h-screen bg-slate-100 font-sans flex items-center justify-center p-4">
-        <div className="bg-white rounded-[2rem] shadow-2xl max-w-4xl w-full overflow-hidden border border-slate-200">
-          <div className="bg-slate-900 p-8 text-center relative border-b-4 border-indigo-500">
-            {examData.orgLogo ? (
-               <img src={examData.orgLogo} alt="Logo" className="w-16 h-16 object-contain mx-auto mb-4 bg-white p-2 rounded-xl shadow-md" />
-            ) : (
-               <div className="w-16 h-16 bg-indigo-500 text-white rounded-xl flex items-center justify-center text-3xl mx-auto mb-4 shadow-md"><i className="fas fa-building"></i></div>
-            )}
-            <h1 className="text-2xl font-black text-white mb-1">{examData.title}</h1>
-            <p className="text-slate-400 font-bold text-sm">Powered by {examData.orgName}</p>
-          </div>
-
-          <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
-            
-            {/* LEFT: SECURITY RULES & CAMERA SETUP */}
-            <div className="space-y-6">
-              <div className="bg-rose-50 border border-rose-200 text-rose-800 p-5 rounded-xl shadow-sm">
-                 <h3 className="font-black flex items-center gap-2 mb-3 text-lg"><i className="fas fa-robot text-rose-600"></i> AI Proctoring Rules</h3>
-                 <ul className="ml-5 list-disc font-bold opacity-90 space-y-1.5 text-sm">
-                   <li>Camera access is mandatory.</li>
-                   <li>Mobile phones or extra people will be flagged.</li>
-                   <li>Browser will lock into Full Screen mode.</li>
-                   <li>Switching tabs will flag your exam.</li>
-                 </ul>
-              </div>
-
-              <div className="flex flex-col gap-3">
-                {!isCameraActive ? (
-                  <button onClick={requestCameraAccess} className="w-full bg-rose-600 text-white px-5 py-3 rounded-xl font-black shadow-md hover:bg-rose-700 transition flex justify-center items-center gap-2">
-                    <i className="fas fa-camera"></i> Grant Camera Permission
-                  </button>
-                ) : (
-                  <div className="bg-slate-900 rounded-xl overflow-hidden border-[3px] border-emerald-500 shadow-lg relative flex flex-col w-full h-48">
-                     <div className="absolute top-2 right-2 bg-emerald-500/20 backdrop-blur text-emerald-400 text-[10px] font-black uppercase px-2 py-1 rounded border border-emerald-500/50 z-10 flex items-center gap-1">
-                       <i className="fas fa-video"></i> Active
-                     </div>
-                     {/* ⚡ FIXED: Auto-attach stream on the instruction screen ⚡ */}
-                     <video 
-                       ref={(el) => {
-                         if (el && mediaStream && el.srcObject !== mediaStream) {
-                           el.srcObject = mediaStream;
-                           videoRef.current = el; 
-                         }
-                       }} 
-                       autoPlay playsInline muted 
-                       className="w-full h-full object-cover transform scale-x-[-1]"
-                     ></video>
-                  </div>
-                )}
-
-                {isCameraActive && (
-                  <div className={`p-3 rounded-xl border flex items-center gap-3 font-bold text-sm ${isAiLoading ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
-                    {isAiLoading ? <i className="fas fa-circle-notch fa-spin"></i> : <i className="fas fa-brain"></i>}
-                    {isAiLoading ? 'Initializing AI Engine...' : 'AI Proctoring Ready'}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* RIGHT: STUDENT FORM */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 shadow-inner">
-              <h3 className="font-black text-slate-800 mb-6 text-xl border-b border-slate-200 pb-3">Student Details</h3>
-              <form onSubmit={startSecureExam} className="space-y-5">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Full Name</label>
-                  <input required type="text" value={studentInfo.name} onChange={e => setStudentInfo({...studentInfo, name: e.target.value})} className="w-full bg-white border border-slate-300 rounded-xl p-3.5 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors shadow-sm" placeholder="e.g. Rahul Sharma" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Email</label>
-                  <input required type="email" value={studentInfo.email} onChange={e => setStudentInfo({...studentInfo, email: e.target.value})} className="w-full bg-white border border-slate-300 rounded-xl p-3.5 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors shadow-sm" placeholder="rahul@example.com" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Mobile Number</label>
-                  <input required type="tel" value={studentInfo.phone} onChange={e => setStudentInfo({...studentInfo, phone: e.target.value})} className="w-full bg-white border border-slate-300 rounded-xl p-3.5 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors shadow-sm" placeholder="9876543210" />
-                </div>
-
-                {/* ⚡ INLINE FORM ERROR DISPLAY ⚡ */}
-                {formError && (
-                  <div className="bg-rose-50 border border-rose-200 text-rose-600 px-4 py-3 rounded-xl text-xs font-black flex items-center gap-2 animate-in fade-in slide-in-from-top-2 mt-2">
-                    <i className="fas fa-exclamation-circle text-base"></i> {formError}
-                  </div>
-                )}
-
-                <button type="submit" disabled={!isCameraActive || isAiLoading} className={`w-full mt-4 text-white py-4 rounded-xl font-black text-lg shadow-lg transition flex items-center justify-center gap-2 ${(!isCameraActive || isAiLoading) ? 'bg-slate-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5 shadow-indigo-600/30'}`}>
-                  <i className="fas fa-lock"></i> {(!isCameraActive || isAiLoading) ? 'Waiting for Security' : 'Start Secure Exam'}
-                </button>
-              </form>
-            </div>
-
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (isFinished) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans relative overflow-hidden">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-emerald-400/20 rounded-full blur-[100px] animate-pulse pointer-events-none"></div>
-        
-        <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-emerald-900/5 max-w-lg w-full overflow-hidden border border-slate-100 relative z-10 animate-in fade-in zoom-in-95 duration-500">
-          <div className="bg-slate-900 p-10 text-center relative overflow-hidden">
-            <div className="absolute -right-10 -top-10 w-40 h-40 bg-emerald-500/20 rounded-full blur-2xl"></div>
-            <div className="w-20 h-20 bg-emerald-500/20 border-2 border-emerald-400 text-emerald-400 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-[0_0_30px_rgba(52,211,153,0.3)] animate-bounce" style={{ animationDuration: '2s' }}>
-              <i className="fas fa-check"></i>
-            </div>
-            <h2 className="text-3xl font-black text-white mb-2 tracking-tight">Assessment Complete</h2>
-            <p className="text-emerald-300 font-medium text-sm">Secure session terminated.</p>
+      <div className="bg-slate-50 min-h-screen font-sans flex flex-col items-center py-10 px-4 select-none">
+        <div className="max-w-4xl w-full bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200">
+          <div className="bg-slate-900 text-white p-6 flex justify-between items-center">
+            <h1 className="text-2xl font-bold"><i className="fas fa-shield-halved text-indigo-400 mr-2"></i> AI Secure Exam Environment</h1>
+            <div className="text-sm font-bold bg-slate-800 px-3 py-1 rounded">Duration: {mockDetails?.duration} mins</div>
           </div>
           
-          <div className="p-8 md:p-10 text-center">
-            <p className="text-slate-600 font-medium text-lg mb-8 leading-relaxed">
-              Thank you, <strong>{studentInfo.name || "Student"}</strong>. Your responses have been encrypted and submitted securely.
-            </p>
-            
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 mb-8 shadow-inner">
-              <div className="flex items-center justify-center gap-4 mb-4">
-                 <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xl shadow-sm shrink-0">
-                   <i className="fas fa-envelope-open-text"></i>
-                 </div>
-                 <div className="text-left">
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Next Steps</p>
-                   <p className="text-sm font-bold text-slate-800">Scorecard sent to your email</p>
-                 </div>
+          <div className="p-8 text-slate-700 space-y-6 max-h-[60vh] overflow-y-auto">
+            <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl flex flex-col md:flex-row gap-6">
+              <div className="flex-1">
+                <h3 className="font-black text-rose-700 flex items-center gap-2 mb-2"><i className="fas fa-robot"></i> AI Proctoring Requirements</h3>
+                <p className="text-sm font-medium text-rose-900 mb-3">
+                  This exam utilizes advanced AI computer vision. <strong>Webcam access is mandatory.</strong> The system actively scans for:
+                </p>
+                <ul className="list-disc pl-5 text-sm font-medium text-rose-900 mb-4 space-y-1">
+                  <li>Mobile phones or unauthorized devices in the frame.</li>
+                  <li>Multiple persons present in the camera view.</li>
+                  <li>Tab switching, window unfocusing, and exiting fullscreen.</li>
+                </ul>
+                <p className="text-sm font-bold text-rose-900">3 violations will result in automatic test termination.</p>
+                
+                <div className="mt-4 flex flex-col gap-3">
+                  {!isCameraActive ? (
+                    <button onClick={requestCameraAccess} className="bg-rose-600 w-fit text-white px-5 py-2 rounded-lg text-sm font-bold shadow-md hover:bg-rose-700 transition">
+                      Grant Camera Permission
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-3 text-emerald-600 font-bold bg-emerald-50 px-4 py-2 border border-emerald-200 rounded-lg w-fit">
+                      <i className="fas fa-check-circle"></i> Camera Active
+                    </div>
+                  )}
+
+                  {isAiLoading ? (
+                    <div className="flex items-center gap-2 text-indigo-600 font-bold text-sm">
+                      <i className="fas fa-circle-notch fa-spin"></i> Initializing AI Proctoring Model...
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 text-indigo-600 font-bold bg-indigo-50 px-4 py-2 border border-indigo-200 rounded-lg w-fit">
+                      <i className="fas fa-brain"></i> AI Engine Ready
+                    </div>
+                  )}
+                </div>
               </div>
-              <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                An automated diagnostic report has been dispatched to <strong className="text-slate-700">{studentInfo.email}</strong> by the {examData.orgName} team.
-              </p>
+
+              {/* LIVE PREVIEW BOX IN INSTRUCTIONS */}
+              {isCameraActive && (
+                <div className="w-full md:w-64 shrink-0 bg-slate-900 rounded-xl overflow-hidden border-2 border-emerald-500 shadow-lg relative flex flex-col">
+                   <div className="bg-slate-800 text-white text-xs font-bold text-center py-1">Live Camera Preview</div>
+                   <video 
+                     ref={(el) => {
+                       if (el && mediaStream && el.srcObject !== mediaStream) {
+                         el.srcObject = mediaStream;
+                         videoRef.current = el; 
+                       }
+                     }} 
+                     autoPlay playsInline muted 
+                     className="w-full h-40 object-cover transform scale-x-[-1]"
+                   ></video>
+                </div>
+              )}
             </div>
 
-            <button onClick={() => window.close()} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-4 rounded-xl font-black transition-colors border border-slate-200 shadow-sm flex items-center justify-center gap-2">
-              <i className="fas fa-times-circle"></i> Close Tab
-            </button>
+            {/* Student Info Form inside Instructions */}
+            {!user && (
+              <div className="mt-6 p-5 border border-slate-200 rounded-xl bg-white shadow-sm">
+                <h3 className="font-black text-slate-800 mb-4 text-lg">Student Details</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <input type="text" placeholder="Full Name" value={studentInfo.name} onChange={e=>setStudentInfo({...studentInfo, name: e.target.value})} className="border border-slate-300 p-2 rounded outline-none focus:border-indigo-500" />
+                  <input type="email" placeholder="Email" value={studentInfo.email} onChange={e=>setStudentInfo({...studentInfo, email: e.target.value})} className="border border-slate-300 p-2 rounded outline-none focus:border-indigo-500" />
+                  <input type="tel" placeholder="Phone" value={studentInfo.phone} onChange={e=>setStudentInfo({...studentInfo, phone: e.target.value})} className="border border-slate-300 p-2 rounded outline-none focus:border-indigo-500" />
+                </div>
+              </div>
+            )}
+
+            <p className="font-bold text-lg text-slate-900 mt-6">Please read the following instructions carefully.</p>
+            <ul className="list-decimal pl-5 space-y-3 font-medium">
+              <li>The clock will be set at the server. The countdown timer will display the remaining time.</li>
+              <li>When the timer reaches zero, the examination will end automatically.</li>
+              <li>This examination uses a strict Fullscreen Anti-Cheat mechanism.</li>
+              <li><strong>Copying text and right-clicking are strictly prohibited.</strong></li>
+            </ul>
+
+            <h3 className="font-bold text-slate-900 mt-6 text-lg">Question Palette Legend:</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+              <div className="flex items-center gap-3"><div className="w-8 h-8 bg-slate-100 text-slate-500 border border-slate-300 rounded-md flex justify-center items-center font-bold">1</div> <span>You have not visited the question yet.</span></div>
+              <div className="flex items-center gap-3"><div className="w-8 h-8 bg-rose-500 text-white clip-not-answered flex justify-center items-center font-bold">2</div> <span>You have not answered the question.</span></div>
+              <div className="flex items-center gap-3"><div className="w-8 h-8 bg-emerald-500 text-white clip-answered flex justify-center items-center font-bold">3</div> <span>You have answered the question.</span></div>
+              <div className="flex items-center gap-3"><div className="w-8 h-8 bg-indigo-600 text-white rounded-full flex justify-center items-center font-bold">4</div> <span>You have NOT answered the question, but marked it for review.</span></div>
+              <div className="flex items-center gap-3 md:col-span-2"><div className="w-8 h-8 bg-indigo-600 text-white rounded-full relative after:absolute after:bottom-0 after:right-0 after:w-2.5 after:h-2.5 after:bg-emerald-400 after:rounded-full after:border-2 after:border-white flex justify-center items-center font-bold">5</div> <span>The question is answered and marked for review.</span></div>
+            </div>
           </div>
 
-          <div className="bg-slate-50 border-t border-slate-100 p-5 text-center flex items-center justify-center gap-3">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Powered securely by</span>
-            {examData.orgLogo ? (
-               <img src={examData.orgLogo} alt="Logo" className="h-5 object-contain grayscale opacity-60" />
-            ) : (
-              <span className="text-xs font-black text-slate-600">{examData.orgName}</span>
-            )}
+          <div className="p-6 bg-slate-100 border-t border-slate-200">
+            <label className="flex items-start gap-3 cursor-pointer p-4 bg-white rounded-xl border border-slate-200 hover:border-indigo-400 transition shadow-sm">
+              <input type="checkbox" checked={hasAcceptedRules} onChange={(e) => setHasAcceptedRules(e.target.checked)} className="mt-1 w-5 h-5 accent-indigo-600 cursor-pointer" />
+              <span className="text-sm font-bold text-slate-700">I have read and understood the instructions. I agree that in case of not adhering to the instructions, including AI detection of unauthorized devices or persons, I will be disqualified.</span>
+            </label>
+            <div className="mt-6 flex justify-end">
+              <button 
+                onClick={handleStartExam} 
+                disabled={!hasAcceptedRules || !isCameraActive || isAiLoading}
+                className={`px-8 py-3.5 rounded-xl font-black shadow-md transition transform flex items-center gap-2 ${(hasAcceptedRules && isCameraActive && !isAiLoading) ? 'bg-indigo-600 text-white hover:bg-indigo-700 hover:-translate-y-0.5 shadow-indigo-600/30' : 'bg-slate-300 text-slate-500 cursor-not-allowed'}`}
+              >
+                {(!isCameraActive || isAiLoading) ? 'Waiting for System Readiness' : 'I am ready to begin'} <i className="fas fa-play ml-1"></i>
+              </button>
+            </div>
           </div>
         </div>
       </div>
     );
   }
 
-  const currentQ = questions[currentQIndex];
+  if (examPhase === 'submitting' || examPhase === 'submitted') {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-900 font-sans p-6 text-center">
+        <div className="max-w-md w-full bg-white p-10 rounded-3xl shadow-2xl transform transition-all scale-100">
+          {examPhase === 'submitting' ? (
+            <>
+              <i className="fas fa-circle-notch fa-spin text-5xl text-indigo-600 mb-6"></i>
+              <h2 className="text-2xl font-black text-slate-800 animate-pulse">Submitting Exam...</h2>
+              <p className="text-slate-500 mt-2">Please do not close this window.</p>
+            </>
+          ) : (
+            <>
+              <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-6"><i className="fas fa-check-double"></i></div>
+              <h2 className="text-3xl font-black text-slate-800 mb-2">Submission Successful</h2>
+              <p className="text-slate-500 mb-6">Your responses have been securely recorded. You may now close this tab.</p>
+              <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden"><div className="bg-emerald-500 h-full w-full animate-[progress_3s_linear]"></div></div>
+            </>
+          )}
+        </div>
+        <style dangerouslySetInnerHTML={{__html: `@keyframes progress { from { width: 0%; } to { width: 100%; } }`}} />
+      </div>
+    );
+  }
+
+  const currentQ = questions[currentIndex];
+  const currentQType = currentQ?.type || 'MCQ';
+  const currentSectionQuestions = questions.map((q, idx) => ({ ...q, globalIndex: idx })).filter(q => (q.section || "General") === activeSection);
+  const localQuestionNumber = currentSectionQuestions.findIndex(q => q.globalIndex === currentIndex) + 1;
 
   return (
-    <div ref={playerRef} className="h-screen flex flex-col bg-white font-sans select-none overflow-hidden relative">
+    <div 
+      ref={containerRef} 
+      className="bg-slate-50 text-slate-900 font-sans h-screen flex flex-col overflow-hidden select-none"
+      onContextMenu={(e) => e.preventDefault()} 
+      onCopy={(e) => e.preventDefault()} 
+    >
       
-      {/* ⚡ PROFESSIONAL SECURITY WARNING MODAL ⚡ */}
-      {warningAlert.show && (
-        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[999999] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border-[3px] border-rose-500 animate-in zoom-in-95 fade-in duration-300">
-            <div className="bg-rose-500 p-6 text-center text-white relative overflow-hidden">
-              <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/diagonal-stripes.png')] opacity-20"></div>
-              <i className="fas fa-exclamation-triangle text-5xl mb-3 relative z-10 animate-pulse"></i>
-              <h2 className="text-2xl font-black relative z-10 tracking-tight">Security Violation</h2>
-            </div>
-            <div className="p-8 text-center bg-white">
-              <p className="text-slate-800 font-bold text-lg mb-2 leading-tight">{warningAlert.reason}</p>
-              <div className="inline-block bg-rose-100 text-rose-700 px-4 py-1.5 rounded-full font-black text-xs uppercase tracking-widest mb-6 border border-rose-200">
-                Warning {warningAlert.count} of {MAX_WARNINGS}
-              </div>
-              
-              {warningAlert.isFinal ? (
-                <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl">
-                  <p className="text-slate-600 font-bold text-sm flex items-center justify-center gap-2">
-                    <i className="fas fa-spinner fa-spin text-rose-500"></i> Auto-submitting exam...
-                  </p>
-                </div>
-              ) : (
-                <button 
-                  onClick={() => {
-                    setWarningAlert({ show: false, reason: "", count: 0, isFinal: false });
-                    const elem = playerRef.current || document.documentElement;
-                    if (elem.requestFullscreen) elem.requestFullscreen().catch(e=>console.log(e));
-                  }} 
-                  className="w-full bg-rose-600 text-white font-black py-4 rounded-xl hover:bg-rose-700 transition-colors shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2"
-                >
-                  <i className="fas fa-shield-alt"></i> I Understand, Return
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ⚡ PROFESSIONAL SMART SUBMIT CONFIRMATION MODAL ⚡ */}
-      {showSubmitConfirm && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[999999] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2rem] shadow-2xl max-w-md w-full overflow-hidden border border-slate-200 animate-in zoom-in-95 fade-in duration-300">
-            <div className="p-8 md:p-10 text-center">
-              <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-inner border border-indigo-100">
-                <i className="fas fa-paper-plane"></i>
-              </div>
-              <h2 className="text-2xl font-black text-slate-900 mb-2">Submit Assessment?</h2>
-              
-              <div className="bg-slate-50 rounded-xl p-4 mb-6 border border-slate-200 text-left space-y-2">
-                <div className="flex justify-between items-center text-sm font-bold">
-                  <span className="text-slate-500">Total Questions:</span>
-                  <span className="text-slate-900">{totalQs}</span>
-                </div>
-                <div className="flex justify-between items-center text-sm font-bold">
-                  <span className="text-emerald-600">Answered:</span>
-                  <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">{answeredCount}</span>
-                </div>
-                <div className="flex justify-between items-center text-sm font-bold">
-                  <span className="text-rose-500">Left Blank:</span>
-                  <span className="text-rose-700 bg-rose-100 px-2 py-0.5 rounded">{totalQs - answeredCount}</span>
-                </div>
-              </div>
-
-              <p className="text-xs text-slate-500 font-bold mb-8 uppercase tracking-widest">You cannot change your answers after submitting.</p>
-              
-              <div className="flex gap-4">
-                <button onClick={() => setShowSubmitConfirm(false)} className="flex-1 bg-slate-100 text-slate-700 font-black py-4 rounded-xl hover:bg-slate-200 transition">Cancel</button>
-                <button onClick={() => submitExam()} className="flex-1 bg-emerald-500 text-white font-black py-4 rounded-xl shadow-lg shadow-emerald-500/30 hover:bg-emerald-600 transition flex items-center justify-center gap-2">
-                  <i className="fas fa-check"></i> Confirm
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <style dangerouslySetInnerHTML={{__html: `
+        .clip-answered { clip-path: polygon(100% 0, 100% 75%, 50% 100%, 0 75%, 0 0); }
+        .clip-not-answered { clip-path: polygon(100% 0, 100% 75%, 50% 100%, 0 75%, 0 0); }
+        @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .animate-slide-up { animation: slideUp 0.3s ease-out forwards; }
+      `}} />
 
       {showCalculator && <DraggableCalculator onClose={() => setShowCalculator(false)} />}
 
-      {/* SECURE HEADER */}
-      <header className="bg-slate-900 border-b border-slate-800 h-16 px-4 md:px-6 flex justify-between items-center shrink-0 z-10 text-white">
-        <div className="flex items-center gap-3">
-          {examData.orgLogo && <img src={examData.orgLogo} alt="Logo" className="h-8 bg-white p-1 rounded-md" />}
-          <span className="font-black text-sm tracking-wide hidden sm:block">{examData.title}</span>
+      {toast.show && (
+        <div className={`fixed bottom-8 right-8 px-6 py-4 rounded-xl shadow-2xl z-[99999] flex items-center gap-3 animate-slide-up ${toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
+          <i className={`fas ${toast.type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'} text-xl`}></i>
+          <span className="font-bold tracking-wide">{toast.message}</span>
         </div>
-        
-        <div className="flex items-center gap-4 md:gap-6">
-          
-          <div className="flex flex-col items-end mr-1 hidden sm:flex">
-            <span className={`text-[10px] font-bold tracking-widest uppercase ${isStrictProctoringActive ? 'text-emerald-400' : 'text-amber-400 animate-pulse'}`}>
-              {isStrictProctoringActive ? 'Strict Mode ON' : 'Initializing...'}
-            </span>
-            <div className="flex items-center gap-1.5 text-xs text-slate-300">
-              <i className="fas fa-brain text-indigo-400"></i> AI Scanning
+      )}
+
+      {modal.show && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-6">
+          <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center">
+            <div className={`w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 ${modal.type === 'warning' ? 'bg-rose-100 text-rose-600' : modal.type === 'info' ? 'bg-indigo-100 text-indigo-600' : 'bg-emerald-100 text-emerald-600'}`}>
+              <i className={`fas ${modal.type === 'warning' ? 'fa-exclamation-triangle' : modal.type === 'info' ? 'fa-info-circle' : 'fa-question-circle'}`}></i>
+            </div>
+            <h2 className="text-2xl font-black text-slate-800 mb-3">{modal.title}</h2>
+            <p className="text-slate-600 mb-8 font-medium leading-relaxed">{modal.message}</p>
+            <div className="flex gap-4">
+              {!modal.hideCancel && (
+                <button 
+                  onClick={modal.onCancel ? modal.onCancel : () => setModal({ show: false, type: "" })} 
+                  className={`flex-1 py-3.5 rounded-xl font-bold transition ${modal.dangerCancel ? 'bg-rose-100 text-rose-700 hover:bg-rose-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                >
+                  {modal.cancelText}
+                </button>
+              )}
+              <button 
+                onClick={modal.onConfirm} 
+                className={`flex-1 text-white py-3.5 rounded-xl font-bold transition shadow-lg ${modal.type === 'warning' ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/30' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30'}`}
+              >
+                {modal.confirmText}
+              </button>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* TINY LIVE CAMERA PREVIEW IN HEADER */}
-          <div className="w-16 h-10 rounded overflow-hidden bg-black border border-emerald-500 relative shadow-inner shadow-black/50">
-             {/* ⚡ ACTIVE EXAM FEED ⚡ */}
-             <video 
-               ref={(el) => {
-                 if (el && mediaStream && el.srcObject !== mediaStream) {
-                   el.srcObject = mediaStream;
-                   videoRef.current = el; // Bind to TFJS ref
-                 }
-               }} 
-               autoPlay playsInline muted 
-               className="w-full h-full object-cover transform scale-x-[-1]"
-             ></video>
-             <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse shadow-rose-500 shadow-sm"></div>
-          </div>
+      <header className="bg-slate-900 text-white p-3 flex justify-between items-center shrink-0 shadow-md z-20">
+        <div className="text-xl font-bold flex items-center gap-2">
+            <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
+        </div>
+        <div className="text-lg font-bold tracking-wide">
+            {mockDetails?.title || "Live Exam"}
+        </div>
+        <div className="flex items-center gap-4">
+            
+            <div className="flex flex-col items-end mr-2">
+              <span className={`text-[10px] font-bold tracking-widest uppercase ${isStrictProctoringActive ? 'text-emerald-400' : 'text-amber-400 animate-pulse'}`}>
+                {isStrictProctoringActive ? 'Strict Mode ON' : 'Initializing...'}
+              </span>
+              <div className="flex items-center gap-1.5 text-xs text-slate-300">
+                <i className="fas fa-brain text-indigo-400"></i> AI Scanning
+              </div>
+            </div>
 
-          {examData.allowCalculator && (
-             <button onClick={() => setShowCalculator(!showCalculator)} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2">
-               <i className="fas fa-calculator text-indigo-300"></i> <span className="hidden md:block">Calculator</span>
-             </button>
-          )}
-          <div className={`font-mono text-lg md:text-2xl font-black flex items-center gap-2 tracking-wider ${timeLeft < 300 ? 'text-rose-400 animate-pulse' : 'text-emerald-400'}`}>
-            <i className="far fa-clock"></i> {formatTime(timeLeft)}
-          </div>
+            {/* LARGER VISIBLE CAMERA FEED */}
+            <div className="w-24 h-16 rounded overflow-hidden bg-black border-2 border-emerald-500 relative shadow-inner shadow-black/50">
+               {/* ⚡ ACTIVE EXAM FEED ⚡ */}
+               <video 
+                 ref={(el) => {
+                   if (el && mediaStream && el.srcObject !== mediaStream) {
+                     el.srcObject = mediaStream;
+                     videoRef.current = el; // Bind to TFJS ref
+                   }
+                 }} 
+                 autoPlay playsInline muted 
+                 className="w-full h-full object-cover transform scale-x-[-1]"
+               ></video>
+               <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse shadow-rose-500 shadow-sm"></div>
+            </div>
+
+            {mockDetails?.allowCalculator !== false && (
+              <button onClick={() => setShowCalculator(!showCalculator)} className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition border ${showCalculator ? 'bg-indigo-600 text-white border-indigo-500 shadow-inner' : 'bg-slate-800 text-slate-200 hover:bg-slate-700 border-slate-700'}`}>
+                  <i className="fas fa-calculator text-indigo-300"></i> Calculator
+              </button>
+            )}
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className={`flex flex-1 overflow-hidden ${modal.show ? 'filter blur-sm pointer-events-none' : ''} transition-all`}>
         
-        {/* LEFT: QUESTION AREA */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col bg-white">
-          <div className="max-w-4xl w-full mx-auto flex-1 flex flex-col">
+        <main className="flex-1 flex flex-col bg-white border-r border-slate-300 relative">
+          
+          <div className="bg-slate-100 pt-2 px-2 flex justify-between items-end border-b border-slate-300 shrink-0">
+            <div className="flex gap-1 overflow-x-auto">
+              {uniqueSections.map((sec) => (
+                <button key={sec} onClick={() => handleSectionTabClick(sec)} className={`px-5 py-2.5 text-sm font-bold rounded-t-xl transition-colors border border-b-0 ${activeSection === sec ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50 shadow-inner'}`}>
+                  {sec}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3 pr-4 pb-1">
+                <span className="text-slate-500 text-sm font-bold uppercase tracking-wide">Time Left:</span>
+                <div className={`px-4 py-1.5 rounded-lg text-lg font-mono font-black shadow-inner border ${timeLeft < 300 ? 'bg-rose-100 text-rose-700 border-rose-300 animate-pulse' : 'bg-slate-800 text-white border-slate-900'}`}>
+                    {formatTime(timeLeft)}
+                </div>
+            </div>
+          </div>
+
+          <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-indigo-50 shrink-0">
+            <div className="flex items-center gap-4">
+               <h2 className="text-lg font-black text-slate-800">Question No. {localQuestionNumber || 1}</h2>
+               <span className="px-3 py-1 bg-white text-indigo-600 rounded-lg text-xs font-black uppercase tracking-wider border border-indigo-200 shadow-sm">{currentQType}</span>
+            </div>
             
-            <div className="flex justify-between items-center mb-6 border-b border-slate-200 pb-3">
-              <div className="flex items-center gap-3">
-                <span className="text-xl font-black text-slate-800">Question {currentQIndex + 1}</span>
-                <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-black tracking-widest border border-slate-200">{currentQ.type}</span>
-              </div>
-              <div className="flex gap-2">
-                <span className="text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded text-xs font-black">+{currentQ.marks || 2}</span>
-                <span className="text-rose-600 bg-rose-50 border border-rose-200 px-2 py-1 rounded text-xs font-black">-{currentQ.negativeMarks || 0.66}</span>
-              </div>
+            <div className="flex gap-6 text-sm font-bold text-slate-600 bg-white px-4 py-1.5 rounded-full border border-indigo-100 shadow-sm">
+                <div className="flex items-center gap-1"><i className="fas fa-plus-circle text-emerald-500"></i> {currentQ?.marks || 2} Marks</div>
+                <div className="flex items-center gap-1"><i className="fas fa-minus-circle text-rose-500"></i> {currentQ?.negativeMarks || 0.66} Marks</div>
             </div>
+          </div>
 
-            {/* --- UPGRADED QUESTION AND DIAGRAM RENDERER --- */}
-            <div className="mb-8">
-              <div className="font-bold text-slate-900 leading-relaxed text-lg whitespace-pre-wrap overflow-x-auto">
-                <Latex>{currentQ.text}</Latex>
-              </div>
-              
-              {/* Dedicated Question Diagram Container */}
-              {currentQ.imageUrl && (
-                <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-slate-50 inline-block shadow-sm">
-                  <img src={currentQ.imageUrl} alt="Question Diagram" className="max-h-[350px] object-contain pointer-events-none" draggable="false" />
+          <div className="flex-1 overflow-y-auto p-8 text-base">
+            <div className="max-w-4xl mx-auto">
+                <div className="mb-8">
+                  <div className="font-bold text-slate-900 leading-relaxed text-lg whitespace-pre-wrap overflow-x-auto">
+                    <Latex>{currentQ?.text}</Latex>
+                  </div>
+                  
+                  {currentQ?.imageUrl && (
+                    <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-slate-50 inline-block shadow-sm">
+                      <img src={currentQ.imageUrl} alt="Question Diagram" className="max-h-[350px] object-contain pointer-events-none" draggable="false" />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+                
+                {currentQType === 'NAT' ? (
+                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 mt-6 shadow-inner w-full max-w-sm">
+                    <label className="block text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">Enter Numerical Value:</label>
+                    <input 
+                      type="number" 
+                      value={answers[currentIndex] || ''} 
+                      onChange={(e) => handleAnswerChange(e.target.value, 'NAT')}
+                      className="w-full bg-white border-2 border-slate-300 rounded-xl p-4 text-2xl font-black text-slate-800 outline-none focus:border-indigo-500 shadow-sm transition"
+                      placeholder="e.g. 4.5"
+                    />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                      {currentQ?.options?.map((opt, i) => {
+                        const isSelected = currentQType === 'MSQ' 
+                          ? (Array.isArray(answers[currentIndex]) && answers[currentIndex].includes(opt.id))
+                          : answers[currentIndex] === opt.id;
 
-            <div className="flex-1">
-              {currentQ.type === 'NAT' ? (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 shadow-inner w-full max-w-sm">
-                  <label className="block text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">Enter Numerical Value:</label>
-                  <input 
-                    type="number" 
-                    value={answers[currentQIndex] || ''} 
-                    onChange={(e) => handleNatInput(e.target.value)} 
-                    className="w-full bg-white border-2 border-slate-300 rounded-xl p-4 text-2xl font-black text-slate-800 outline-none focus:border-indigo-500 shadow-sm transition" 
-                    placeholder="e.g. 4.5"
-                  />
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-4">
-                  {currentQ.options?.map((opt, idx) => {
-                    const isSelected = currentQ.type === 'MSQ' 
-                      ? (Array.isArray(answers[currentQIndex]) && answers[currentQIndex].includes(opt.id))
-                      : answers[currentQIndex] === opt.id;
-
-                    return (
-                      <label key={idx} className={`flex items-start gap-4 p-4 border-2 rounded-xl cursor-pointer transition-all shadow-sm ${isSelected ? 'border-indigo-600 bg-indigo-50 shadow-md' : 'border-slate-200 hover:border-slate-400 bg-white'}`}>
-                        <div className={`w-6 h-6 shrink-0 mt-0.5 flex items-center justify-center border-2 ${currentQ.type === 'MSQ' ? 'rounded' : 'rounded-full'} ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-400 text-transparent'}`}>
-                          <i className={`fas ${currentQ.type === 'MSQ' ? 'fa-check text-[10px]' : 'fa-circle text-[8px]'}`}></i>
-                        </div>
-                        <input 
-                          type={currentQ.type === 'MSQ' ? "checkbox" : "radio"} 
-                          checked={isSelected} 
-                          onChange={() => handleAnswerSelect(opt.id)} 
-                          className="hidden" 
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-bold text-slate-800 leading-relaxed"><Latex>{opt.text}</Latex></div>
-                          
-                          {/* Dedicated Option Diagram Container */}
-                          {opt.imageUrl && (
-                            <div className="mt-3 inline-block">
-                              <img src={opt.imageUrl} alt={`Option ${opt.id} Diagram`} className="max-h-32 object-contain border border-slate-200 rounded-lg p-1.5 bg-white shadow-sm pointer-events-none" draggable="false" />
-                            </div>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
+                        return (
+                          <label key={i} className={`flex items-start gap-4 p-4 border-2 rounded-xl cursor-pointer transition-all shadow-sm ${isSelected ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-slate-300 bg-white'}`}>
+                              <input 
+                                type={currentQType === 'MSQ' ? "checkbox" : "radio"} 
+                                name={currentQType === 'MSQ' ? `q-${currentIndex}-${i}` : `q-${currentIndex}`} 
+                                checked={isSelected} 
+                                onChange={() => handleAnswerChange(opt.id, currentQType)} 
+                                className={`mt-1 w-5 h-5 cursor-pointer shrink-0 accent-indigo-600 ${currentQType === 'MSQ' ? 'rounded-sm' : ''}`} 
+                              />
+                              <div className="flex-1 overflow-x-auto">
+                                <div className="font-bold text-slate-800 text-base"><Latex>{opt.text}</Latex></div>
+                                
+                                {opt.imageUrl && (
+                                  <div className="mt-3 inline-block">
+                                    <img src={opt.imageUrl} alt={`Option ${opt.id} Diagram`} className="max-h-32 object-contain border border-slate-200 rounded-lg p-1.5 bg-white shadow-sm pointer-events-none" draggable="false" />
+                                  </div>
+                                )}
+                              </div>
+                          </label>
+                        )
+                      })}
+                  </div>
+                )}
             </div>
+          </div>
 
-            {/* BOTTOM CONTROLS */}
-            <div className="mt-8 pt-4 border-t border-slate-200 flex flex-wrap justify-between gap-4">
-              <div className="flex gap-3">
-                <button 
-                  onClick={toggleReview} 
-                  className={`px-4 py-2.5 rounded-xl text-xs font-black shadow-sm transition border ${markedForReview[currentQIndex] ? 'bg-purple-100 text-purple-700 border-purple-300' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
-                >
-                  <i className="fas fa-bookmark mr-1.5"></i> {markedForReview[currentQIndex] ? "Unmark Review" : "Mark for Review"}
+          <div className="p-4 bg-slate-100 border-t border-slate-300 flex justify-between items-center shrink-0">
+            <div className="flex gap-3">
+                <button onClick={clearResponse} className="bg-white border border-slate-300 text-slate-700 px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-50 shadow-sm transition">
+                    Clear Response
                 </button>
-                <button onClick={clearResponse} className="bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-xs font-black shadow-sm hover:bg-slate-200 transition">
-                  Clear
+                <button onClick={markAndNext} className="bg-amber-500 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-amber-600 shadow-sm transition">
+                    Mark for Review & Next
                 </button>
-              </div>
-              
-              <div className="flex gap-3">
-                <button onClick={() => navigateTo(Math.max(0, currentQIndex - 1))} disabled={currentQIndex === 0} className="bg-slate-800 text-white px-6 py-2.5 rounded-xl text-sm font-black shadow-md hover:bg-slate-700 transition disabled:opacity-50">
-                  <i className="fas fa-arrow-left"></i>
-                </button>
-                <button onClick={() => navigateTo(Math.min(questions.length - 1, currentQIndex + 1))} disabled={currentQIndex === questions.length - 1} className="bg-indigo-600 text-white px-8 py-2.5 rounded-xl text-sm font-black shadow-md hover:bg-indigo-700 transition disabled:opacity-50">
-                  Next <i className="fas fa-arrow-right ml-2"></i>
-                </button>
-              </div>
             </div>
+            <button onClick={saveAndNext} className="bg-emerald-600 text-white px-8 py-2.5 rounded-lg text-sm font-bold hover:bg-emerald-700 shadow-sm transition flex items-center gap-2">
+                Save & Next <i className="fas fa-chevron-right text-xs"></i>
+            </button>
           </div>
         </main>
 
-        {/* RIGHT: QUESTION PALETTE */}
-        <aside className="w-72 bg-slate-50 border-l border-slate-200 hidden lg:flex flex-col shrink-0">
-          
-          <div className="p-4 grid grid-cols-2 gap-2 text-[10px] font-black uppercase tracking-wide border-b border-slate-200 bg-white">
-             <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-2 rounded-lg flex justify-between items-center">
-               <span>Answered</span> <span className="text-sm">{answeredCount}</span>
-             </div>
-             <div className="bg-rose-50 border border-rose-200 text-rose-700 p-2 rounded-lg flex justify-between items-center">
-               <span>Not Ans</span> <span className="text-sm">{notAnsweredCount}</span>
-             </div>
-             <div className="bg-slate-100 border border-slate-200 text-slate-600 p-2 rounded-lg flex justify-between items-center">
-               <span>Not Visit</span> <span className="text-sm">{notVisitedCount}</span>
-             </div>
-             <div className="bg-purple-50 border border-purple-200 text-purple-700 p-2 rounded-lg flex justify-between items-center">
-               <span>Review</span> <span className="text-sm">{markedCount}</span>
-             </div>
+        <aside className="w-[320px] bg-slate-50 flex flex-col shrink-0 border-l border-slate-200 overflow-hidden">
+          <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-4 shrink-0">
+            <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Student&background=4F46E5&color=fff"} alt="Candidate" className="w-14 h-14 rounded-lg border border-slate-200 shadow-sm pointer-events-none" />
+            <div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-widest font-black mb-0.5">Candidate</div>
+                <div className="text-sm font-bold text-slate-800 truncate w-48">{studentInfo.name || user?.fullName || "Student"}</div>
+            </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4">
-            <h3 className="text-xs font-black text-slate-800 mb-3 uppercase tracking-widest">Question Palette</h3>
-            <div className="grid grid-cols-5 gap-2">
-              {questions.map((_, i) => {
-                const isAnswered = questions[i].type === 'MSQ' ? (Array.isArray(answers[i]) && answers[i].length > 0) : (answers[i] !== undefined && answers[i] !== "");
-                const isMarked = markedForReview[i];
-                const isVis = visited[i];
-                const isCurrent = currentQIndex === i;
-                
-                let btnStyle = "bg-white border-slate-300 text-slate-500"; 
-                if (isVis && !isAnswered) btnStyle = "bg-rose-100 border-rose-300 text-rose-700"; 
-                if (isAnswered) btnStyle = "bg-emerald-500 border-emerald-500 text-white"; 
-                if (isMarked) btnStyle = "bg-purple-500 border-purple-500 text-white"; 
-                if (isMarked && isAnswered) btnStyle = "bg-purple-600 border-purple-600 text-white shadow-[inset_0_-4px_0_0_#34d399]"; 
+          <div className="p-4 border-b border-slate-200 bg-white shrink-0">
+            <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+              <span className="text-xs font-black text-slate-700 uppercase tracking-widest">Total Questions</span>
+              <span className="text-sm font-black text-indigo-700 bg-indigo-100/50 border border-indigo-200 px-3 py-1 rounded-lg">{questions.length}</span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-y-3 gap-x-3">
+              <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 bg-emerald-500 clip-answered shadow-sm"></div>
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">Answered</span>
+                </div>
+                <span className="text-xs font-black text-slate-900">{getStatusCount('answered')}</span>
+              </div>
+              
+              <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 bg-rose-500 clip-not-answered shadow-sm"></div>
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">Not Ans</span>
+                </div>
+                <span className="text-xs font-black text-slate-900">{getStatusCount('not-answered')}</span>
+              </div>
+              
+              <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 bg-white border border-slate-300 rounded shadow-sm"></div>
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">Not Visited</span>
+                </div>
+                <span className="text-xs font-black text-slate-900">{getStatusCount('not-visited')}</span>
+              </div>
+              
+              <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 bg-indigo-600 rounded-full shadow-sm"></div>
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">Marked</span>
+                </div>
+                <span className="text-xs font-black text-slate-900">{getStatusCount('marked')}</span>
+              </div>
+            </div>
 
+            <div className="mt-3 bg-slate-50 border border-slate-100 p-3 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-6 h-6 bg-indigo-600 rounded-full relative flex shrink-0 shadow-sm after:absolute after:bottom-0 after:right-0 after:w-2 after:h-2 after:bg-emerald-400 after:rounded-full after:border border-white"></div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-slate-700 uppercase">Ans & Marked</span>
+                  <span className="text-[8px] text-slate-500 font-medium tracking-wide">Will be evaluated</span>
+                </div>
+              </div>
+              <span className="text-sm font-black text-slate-900">{getStatusCount('answered-marked')}</span>
+            </div>
+          </div>
+
+          <div className="bg-indigo-600 text-white py-3 px-5 text-sm font-bold flex justify-between items-center shadow-sm z-10 shrink-0">
+            <span>{activeSection}</span>
+            <span className="bg-indigo-800 px-2 py-0.5 rounded text-xs">{currentSectionQuestions.length} Qs</span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-5 bg-slate-100/50">
+            <div className="grid grid-cols-5 gap-3">
+              {currentSectionQuestions.map((q, localIndex) => {
+                const isCurrent = q.globalIndex === currentIndex;
                 return (
-                  <button 
-                    key={i}
-                    onClick={() => navigateTo(i)}
-                    className={`h-10 rounded-lg text-xs font-black transition-all border-2 flex items-center justify-center shadow-sm relative
-                      ${btnStyle} 
-                      ${isCurrent ? 'ring-2 ring-indigo-500 ring-offset-2 scale-110 z-10' : 'hover:scale-105'}`}
+                  <div 
+                    key={q.globalIndex} 
+                    className={`relative flex items-center justify-center w-12 h-12 rounded-lg transition-all 
+                      ${isCurrent ? 'bg-slate-300 border-2 border-slate-500 shadow-inner' : ''}
+                    `}
                   >
-                    {i + 1}
-                  </button>
-                );
+                    <button 
+                      onClick={() => navigateQuestion(q.globalIndex)}
+                      className={`w-10 h-10 font-black flex items-center justify-center transition-transform shadow-sm
+                        ${getPaletteClass(statuses[q.globalIndex])}
+                        ${isCurrent ? 'scale-105 z-10 shadow-md' : 'hover:opacity-80 hover:scale-105'}
+                      `}
+                    >
+                      {localIndex + 1}
+                    </button>
+                  </div>
+                )
               })}
             </div>
           </div>
 
-          <div className="p-4 border-t border-slate-200 bg-white">
-            <button onClick={() => setShowSubmitConfirm(true)} className="w-full bg-slate-900 hover:bg-black text-white py-3.5 rounded-xl text-sm font-black shadow-lg transition uppercase tracking-widest flex items-center justify-center gap-2">
-              <i className="fas fa-paper-plane"></i> Final Submit
+          <div className="p-5 bg-white border-t border-slate-200 flex justify-center shrink-0">
+            <button 
+              onClick={triggerSubmitConfirmation}
+              className="w-full bg-indigo-600 text-white py-3.5 rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition transform hover:-translate-y-0.5"
+            >
+                Submit Exam
             </button>
           </div>
         </aside>

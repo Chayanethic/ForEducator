@@ -144,6 +144,13 @@ export default function IframeStudentPlayer({ params }) {
   const [isAiLoading, setIsAiLoading] = useState(true);
   const [isStrictProctoringActive, setIsStrictProctoringActive] = useState(false);
 
+  // ⚡ NEW: STUDENT REVIEW STATE ⚡
+  const [rating, setRating] = useState(0);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [reviewText, setReviewText] = useState("");
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [isReviewSubmitted, setIsReviewSubmitted] = useState(false);
+
   const showToast = (message, type = "success") => {
     setToast({ show: true, message, type });
     setTimeout(() => setToast({ show: false, message: "", type: "success" }), 3000);
@@ -332,20 +339,19 @@ export default function IframeStudentPlayer({ params }) {
     };
   }, [isStrictProctoringActive, isFinished, warningAlert.show]);
 
-  // ⚡ UPDATED AI PROCTORING LOOP (ULTRA FAST + BLOCKED CAMERA DETECTION) ⚡
+  // AI Proctoring Loop
   useEffect(() => {
     if (!isStrictProctoringActive || isFinished || warningAlert.show || !aiModel || !isCameraActive) return;
 
-    let isDetecting = true; // Prevents overlapping frames and memory leaks
+    let isDetecting = true; 
 
     const runAiDetection = async () => {
       if (!isDetecting || warningAlert.show) return;
 
       if (videoRef.current && videoRef.current.readyState >= 2) {
         try {
-          // 1. HIDDEN/BLOCKED CAMERA CHECK (Uses HTML5 Canvas to read pixel brightness)
           const canvas = document.createElement("canvas");
-          canvas.width = 64; // Small resolution for rapid checking
+          canvas.width = 64; 
           canvas.height = 64;
           const ctx = canvas.getContext("2d", { willReadFrequently: true });
           ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
@@ -354,22 +360,19 @@ export default function IframeStudentPlayer({ params }) {
           let colorSum = 0;
           
           for (let i = 0; i < pixels.length; i += 4) {
-              // Get average of RGB channels
               colorSum += (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
           }
           const brightness = colorSum / (canvas.width * canvas.height);
           
           if (brightness < 12) { 
-            // If average pixel brightness is near black, camera is covered
             issueWarning("Camera Obstructed: Please ensure your face is clearly visible.");
           } else {
-            // 2. MOBILE PHONE & MULTIPLE PERSONS CHECK
             const predictions = await aiModel.detect(videoRef.current);
             let personCount = 0;
             let phoneDetected = false;
 
             predictions.forEach(prediction => {
-              if (prediction.score > 0.40) { // Aggressive threshold to catch split-second flashes
+              if (prediction.score > 0.40) { 
                 if (prediction.class === 'person') personCount++;
                 if (prediction.class === 'cell phone') phoneDetected = true;
               }
@@ -386,17 +389,15 @@ export default function IframeStudentPlayer({ params }) {
         }
       }
 
-      // Loop recursively for ultra-fast, non-overlapping detection (300ms)
       if (isDetecting) {
         setTimeout(runAiDetection, 300);
       }
     };
 
-    // Kickstart the loop
     runAiDetection();
 
     return () => {
-      isDetecting = false; // Clean up
+      isDetecting = false; 
     };
   }, [isStrictProctoringActive, isFinished, warningAlert.show, aiModel, isCameraActive]);
 
@@ -566,6 +567,26 @@ export default function IframeStudentPlayer({ params }) {
     }
   };
 
+  // ⚡ NEW: HANDLE STUDENT REVIEW SUBMISSION ⚡
+  const handleReviewSubmit = async () => {
+    if (rating === 0) return; 
+    setIsSubmittingReview(true);
+    try {
+      await addDoc(collection(db, "mocks", mockId, "reviews"), {
+        studentName: studentInfo.name?.trim() || "Anonymous Student",
+        studentEmail: studentInfo.email?.trim() || "No Email",
+        rating,
+        reviewText: reviewText.trim(),
+        createdAt: new Date()
+      });
+      setIsReviewSubmitted(true);
+    } catch (error) {
+      console.error("Failed to submit review", error);
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
+
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
@@ -573,7 +594,6 @@ export default function IframeStudentPlayer({ params }) {
     return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s < 10 ? '0' : ''}${s}s`;
   };
 
-  // --- STATUS CALCULATIONS ---
   const totalQs = questions.length;
   let answeredCount = 0;
   let notAnsweredCount = 0;
@@ -590,8 +610,6 @@ export default function IframeStudentPlayer({ params }) {
     else if (isAnswered) answeredCount++;
     else notAnsweredCount++;
   });
-
-  // --- UI SCREENS ---
 
   if (isLoading || examPhase === 'loading') return <div className="flex h-screen items-center justify-center bg-white"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>;
   if (!examData || questions.length === 0) return <div className="flex h-screen items-center justify-center bg-white text-slate-500 font-bold">This exam is unavailable.</div>;
@@ -611,8 +629,6 @@ export default function IframeStudentPlayer({ params }) {
           </div>
 
           <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
-            
-            {/* LEFT: SECURITY RULES & CAMERA SETUP */}
             <div className="space-y-6">
               <div className="bg-rose-50 border border-rose-200 text-rose-800 p-5 rounded-xl shadow-sm">
                  <h3 className="font-black flex items-center gap-2 mb-3 text-lg"><i className="fas fa-robot text-rose-600"></i> AI Proctoring Rules</h3>
@@ -647,7 +663,6 @@ export default function IframeStudentPlayer({ params }) {
               </div>
             </div>
 
-            {/* RIGHT: STUDENT FORM */}
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 shadow-inner">
               <h3 className="font-black text-slate-800 mb-6 text-xl border-b border-slate-200 pb-3">Student Details</h3>
               <form onSubmit={startSecureExam} className="space-y-5">
@@ -664,7 +679,6 @@ export default function IframeStudentPlayer({ params }) {
                   <input required type="tel" value={studentInfo.phone} onChange={e => setStudentInfo({...studentInfo, phone: e.target.value})} className="w-full bg-white border border-slate-300 rounded-xl p-3.5 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 transition-colors shadow-sm" placeholder="9876543210" />
                 </div>
 
-                {/* ⚡ INLINE FORM ERROR DISPLAY ⚡ */}
                 {formError && (
                   <div className="bg-rose-50 border border-rose-200 text-rose-600 px-4 py-3 rounded-xl text-xs font-black flex items-center gap-2 animate-in fade-in slide-in-from-top-2 mt-2">
                     <i className="fas fa-exclamation-circle text-base"></i> {formError}
@@ -685,10 +699,10 @@ export default function IframeStudentPlayer({ params }) {
 
   if (examPhase === 'submitting' || examPhase === 'submitted') {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans relative overflow-hidden">
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 font-sans relative overflow-x-hidden overflow-y-auto py-10">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-emerald-400/20 rounded-full blur-[100px] animate-pulse pointer-events-none"></div>
         
-        <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-emerald-900/5 max-w-lg w-full overflow-hidden border border-slate-100 relative z-10 animate-in fade-in zoom-in-95 duration-500">
+        <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-emerald-900/5 max-w-lg w-full overflow-hidden border border-slate-100 relative z-10 animate-in fade-in zoom-in-95 duration-500 my-auto">
           <div className="bg-slate-900 p-10 text-center relative overflow-hidden">
             <div className="absolute -right-10 -top-10 w-40 h-40 bg-emerald-500/20 rounded-full blur-2xl"></div>
             {examPhase === 'submitting' ? (
@@ -721,13 +735,67 @@ export default function IframeStudentPlayer({ params }) {
                  </div>
               </div>
               <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                An automated diagnostic report has been dispatched to <strong className="text-slate-700">{studentInfo.email}</strong> by the {examData.orgName || "OZONE"} team.
+                An automated diagnostic report has been dispatched to <strong className="text-slate-700">{studentInfo.email}</strong> by the {examData?.orgName || "OZONE"} team.
               </p>
             </div>
+
+            {/* ⚡ NEW: INTERACTIVE REVIEW SECTION ⚡ */}
+            {examPhase === 'submitted' && !isReviewSubmitted && (
+              <div className="bg-white border-2 border-slate-100 rounded-2xl p-6 mb-8 shadow-sm">
+                <h3 className="text-lg font-black text-slate-800 mb-2">How was your experience?</h3>
+                <p className="text-xs font-bold text-slate-500 mb-4">Your feedback helps {examData?.orgName || "us"} improve future assessments.</p>
+
+                <div className="flex justify-center gap-3 mb-5">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      className="text-4xl focus:outline-none transition-transform hover:scale-110"
+                      onMouseEnter={() => setHoverRating(star)}
+                      onMouseLeave={() => setHoverRating(0)}
+                      onClick={() => setRating(star)}
+                    >
+                      <i className={`fa-star ${star <= (hoverRating || rating) ? 'fas text-amber-400 drop-shadow-md' : 'far text-slate-200'}`}></i>
+                    </button>
+                  ))}
+                </div>
+
+                <textarea
+                  value={reviewText}
+                  onChange={(e) => setReviewText(e.target.value)}
+                  placeholder="Tell us what you thought (optional)..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-sm font-bold text-slate-700 outline-none focus:border-indigo-500 transition resize-none h-24 mb-4 shadow-inner"
+                ></textarea>
+
+                <button
+                  onClick={handleReviewSubmit}
+                  disabled={rating === 0 || isSubmittingReview}
+                  className={`w-full py-3.5 rounded-xl font-black transition flex justify-center items-center gap-2 ${rating === 0 || isSubmittingReview ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-md shadow-indigo-600/30'}`}
+                >
+                  {isSubmittingReview ? <i className="fas fa-spinner fa-spin"></i> : <><i className="fas fa-paper-plane"></i> Submit Feedback</>}
+                </button>
+              </div>
+            )}
+
+            {examPhase === 'submitted' && isReviewSubmitted && (
+              <div className="bg-emerald-50 text-emerald-700 p-5 rounded-2xl mb-8 flex flex-col items-center justify-center gap-2 font-black border-2 border-emerald-200 shadow-sm animate-in zoom-in-95">
+                 <i className="fas fa-heart text-3xl text-emerald-500 mb-1"></i>
+                 <p className="text-lg">Thank you for your feedback!</p>
+              </div>
+            )}
 
             <button onClick={() => window.close()} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-4 rounded-xl font-black transition-colors border border-slate-200 shadow-sm flex items-center justify-center gap-2">
               <i className="fas fa-times-circle"></i> Close Tab
             </button>
+          </div>
+
+          <div className="bg-slate-50 border-t border-slate-100 p-5 text-center flex items-center justify-center gap-3">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Powered securely by</span>
+            {examData?.orgLogo ? (
+               <img src={examData.orgLogo} alt="Logo" className="h-5 object-contain grayscale opacity-60" />
+            ) : (
+              <span className="text-xs font-black text-slate-600">{examData?.orgName || "OZONE Academy"}</span>
+            )}
           </div>
         </div>
       </div>
@@ -820,8 +888,8 @@ export default function IframeStudentPlayer({ params }) {
       {/* SECURE HEADER */}
       <header className="bg-slate-900 border-b border-slate-800 h-16 px-4 md:px-6 flex justify-between items-center shrink-0 z-10 text-white">
         <div className="flex items-center gap-3">
-          {examData.orgLogo && <img src={examData.orgLogo} alt="Logo" className="h-8 bg-white p-1 rounded-md" />}
-          <span className="font-black text-sm tracking-wide hidden sm:block">{examData.title}</span>
+          {examData?.orgLogo && <img src={examData.orgLogo} alt="Logo" className="h-8 bg-white p-1 rounded-md" />}
+          <span className="font-black text-sm tracking-wide hidden sm:block">{examData?.title}</span>
         </div>
         
         <div className="flex items-center gap-4 md:gap-6">
@@ -846,7 +914,7 @@ export default function IframeStudentPlayer({ params }) {
              <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse shadow-rose-500 shadow-sm"></div>
           </div>
 
-          {examData.allowCalculator && (
+          {examData?.allowCalculator && (
              <button onClick={() => setShowCalculator(!showCalculator)} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2">
                <i className="fas fa-calculator text-indigo-300"></i> <span className="hidden md:block">Calculator</span>
              </button>

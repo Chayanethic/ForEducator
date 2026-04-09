@@ -120,6 +120,8 @@ export default function IframeStudentPlayer({ params }) {
   const [examPhase, setExamPhase] = useState('loading'); 
   const [isSubmittingEngine, setIsSubmittingEngine] = useState(false);
   
+  const [isBlurred, setIsBlurred] = useState(false);
+
   // Tracking Matrices
   const [answers, setAnswers] = useState({});
   const [visited, setVisited] = useState({});
@@ -144,12 +146,16 @@ export default function IframeStudentPlayer({ params }) {
   const [isAiLoading, setIsAiLoading] = useState(true);
   const [isStrictProctoringActive, setIsStrictProctoringActive] = useState(false);
 
-  // ⚡ NEW: STUDENT REVIEW STATE ⚡
+  // STUDENT REVIEW STATE
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
   const [reviewText, setReviewText] = useState("");
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [isReviewSubmitted, setIsReviewSubmitted] = useState(false);
+
+  // ⚡ NEW: SPOTLIGHT TRACKING STATE ⚡
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const questionContainerRef = useRef(null);
 
   const showToast = (message, type = "success") => {
     setToast({ show: true, message, type });
@@ -264,6 +270,40 @@ export default function IframeStudentPlayer({ params }) {
     }, 1000);
     return () => clearInterval(timer);
   }, [hasStarted, isFinished, timeLeft, warningAlert.show, isSubmittingEngine]);
+
+  // ⚡ BLIND-BLUR EVENT LISTENER ⚡
+  useEffect(() => {
+    if (examPhase !== 'active') return;
+
+    const handleBlur = () => setIsBlurred(true);
+    const handleFocus = () => setIsBlurred(false);
+
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [examPhase]);
+
+  // ⚡ SPOTLIGHT MOUSE TRACKER ⚡
+  useEffect(() => {
+    if (!examData?.spotlightMode || examPhase !== 'active') return;
+    
+    const handleMouseMove = (e) => {
+      if (questionContainerRef.current) {
+        const rect = questionContainerRef.current.getBoundingClientRect();
+        setMousePos({
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        });
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, [examData?.spotlightMode, examPhase]);
 
   // ==========================================
   // AGGRESSIVE ANTI-CHEAT ENGINE
@@ -487,6 +527,7 @@ export default function IframeStudentPlayer({ params }) {
     setIsFinished(true);
     setShowSubmitConfirm(false);
     setExamPhase('submitting');
+    setIsBlurred(false); 
     
     if (mediaStream) {
       mediaStream.getTracks().forEach(track => track.stop());
@@ -567,7 +608,7 @@ export default function IframeStudentPlayer({ params }) {
     }
   };
 
-  // ⚡ NEW: HANDLE STUDENT REVIEW SUBMISSION ⚡
+  // HANDLE STUDENT REVIEW SUBMISSION
   const handleReviewSubmit = async () => {
     if (rating === 0) return; 
     setIsSubmittingReview(true);
@@ -807,6 +848,28 @@ export default function IframeStudentPlayer({ params }) {
   return (
     <div ref={playerRef} className="h-screen flex flex-col bg-white font-sans select-none overflow-hidden relative">
       
+      {/* ⚡ FORENSIC WATERMARK (Prevents clear screen captures) ⚡ */}
+      {hasStarted && !isFinished && (
+        <div className="fixed inset-0 pointer-events-none z-[9998] opacity-[0.03] overflow-hidden flex flex-wrap justify-center items-center gap-10 rotate-[-25deg] select-none">
+          {Array.from({ length: 50 }).map((_, i) => (
+            <span key={i} className="text-2xl font-black text-slate-900 whitespace-nowrap">
+              {studentInfo.email} • {studentInfo.name} • EXAM-{mockId.slice(-6)}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* ⚡ BLIND-BLUR LOCK SCREEN OVERLAY (Multi-monitor block) ⚡ */}
+      {isBlurred && hasStarted && !isFinished && (
+        <div className="absolute inset-0 z-[99999] flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-xl animate-in fade-in duration-200">
+           <i className="fas fa-eye-slash text-7xl text-rose-500 mb-6 animate-pulse"></i>
+           <h2 className="text-4xl font-black text-white tracking-tight">Focus Lost</h2>
+           <p className="text-slate-300 font-bold mt-3 text-lg text-center max-w-md">
+             You have clicked outside the secure exam window. <br/> Return immediately.
+           </p>
+        </div>
+      )}
+
       {/* ⚡ PROFESSIONAL SECURITY WARNING MODAL ⚡ */}
       {warningAlert.show && (
         <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[999999] flex items-center justify-center p-4">
@@ -885,205 +948,231 @@ export default function IframeStudentPlayer({ params }) {
 
       {showCalculator && <DraggableCalculator onClose={() => setShowCalculator(false)} />}
 
-      {/* SECURE HEADER */}
-      <header className="bg-slate-900 border-b border-slate-800 h-16 px-4 md:px-6 flex justify-between items-center shrink-0 z-10 text-white">
-        <div className="flex items-center gap-3">
-          {examData?.orgLogo && <img src={examData.orgLogo} alt="Logo" className="h-8 bg-white p-1 rounded-md" />}
-          <span className="font-black text-sm tracking-wide hidden sm:block">{examData?.title}</span>
-        </div>
+      <div className={`flex-1 flex flex-col h-full overflow-hidden transition-all duration-100 ${isBlurred ? 'blur-xl grayscale pointer-events-none' : ''}`}>
         
-        <div className="flex items-center gap-4 md:gap-6">
+        {/* SECURE HEADER */}
+        <header className="bg-slate-900 border-b border-slate-800 h-16 px-4 md:px-6 flex justify-between items-center shrink-0 z-10 text-white">
+          <div className="flex items-center gap-3">
+            {examData?.orgLogo && <img src={examData.orgLogo} alt="Logo" className="h-8 bg-white p-1 rounded-md" />}
+            <span className="font-black text-sm tracking-wide hidden sm:block">{examData?.title}</span>
+          </div>
           
-          <div className="flex flex-col items-end mr-1 hidden sm:flex">
-            <span className={`text-[10px] font-bold tracking-widest uppercase ${isStrictProctoringActive ? 'text-emerald-400' : 'text-amber-400 animate-pulse'}`}>
-              {isStrictProctoringActive ? 'Strict Mode ON' : 'Initializing...'}
-            </span>
-            <div className="flex items-center gap-1.5 text-xs text-slate-300">
-              <i className="fas fa-brain text-indigo-400"></i> AI Scanning
-            </div>
-          </div>
-
-          {/* TINY LIVE CAMERA PREVIEW IN HEADER */}
-          <div className="w-16 h-10 rounded overflow-hidden bg-black border border-emerald-500 relative shadow-inner shadow-black/50">
-             <video ref={(el) => {
-               if (el && mediaStream && el.srcObject !== mediaStream) {
-                 el.srcObject = mediaStream;
-                 videoRef.current = el; // Bind to TFJS ref
-               }
-             }} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]"></video>
-             <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse shadow-rose-500 shadow-sm"></div>
-          </div>
-
-          {examData?.allowCalculator && (
-             <button onClick={() => setShowCalculator(!showCalculator)} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2">
-               <i className="fas fa-calculator text-indigo-300"></i> <span className="hidden md:block">Calculator</span>
-             </button>
-          )}
-          <div className={`font-mono text-lg md:text-2xl font-black flex items-center gap-2 tracking-wider ${timeLeft < 300 ? 'text-rose-400 animate-pulse' : 'text-emerald-400'}`}>
-            <i className="far fa-clock"></i> {formatTime(timeLeft)}
-          </div>
-        </div>
-      </header>
-
-      <div className="flex-1 flex overflow-hidden">
-        
-        {/* LEFT: QUESTION AREA */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col bg-white">
-          <div className="max-w-4xl w-full mx-auto flex-1 flex flex-col">
+          <div className="flex items-center gap-4 md:gap-6">
             
-            <div className="flex justify-between items-center mb-6 border-b border-slate-200 pb-3">
-              <div className="flex items-center gap-3">
-                <span className="text-xl font-black text-slate-800">Question {currentQIndex + 1}</span>
-                <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-black tracking-widest border border-slate-200">{currentQ.type}</span>
-              </div>
-              <div className="flex gap-2">
-                <span className="text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded text-xs font-black">+{currentQ.marks || 2}</span>
-                <span className="text-rose-600 bg-rose-50 border border-rose-200 px-2 py-1 rounded text-xs font-black">-{currentQ.negativeMarks || 0.66}</span>
+            <div className="flex flex-col items-end mr-1 hidden sm:flex">
+              <span className={`text-[10px] font-bold tracking-widest uppercase ${isStrictProctoringActive ? 'text-emerald-400' : 'text-amber-400 animate-pulse'}`}>
+                {isStrictProctoringActive ? 'Strict Mode ON' : 'Initializing...'}
+              </span>
+              <div className="flex items-center gap-1.5 text-xs text-slate-300">
+                <i className="fas fa-brain text-indigo-400"></i> AI Scanning
               </div>
             </div>
 
-            {/* --- UPGRADED QUESTION AND DIAGRAM RENDERER --- */}
-            <div className="mb-8">
-              <div className="font-bold text-slate-900 leading-relaxed text-lg whitespace-pre-wrap overflow-x-auto">
-                <Latex>{currentQ.text}</Latex>
-              </div>
-              
-              {/* Dedicated Question Diagram Container */}
-              {currentQ.imageUrl && (
-                <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-slate-50 inline-block shadow-sm">
-                  <img src={currentQ.imageUrl} alt="Question Diagram" className="max-h-[350px] object-contain pointer-events-none" draggable="false" />
-                </div>
-              )}
+            {/* TINY LIVE CAMERA PREVIEW IN HEADER */}
+            <div className="w-16 h-10 rounded overflow-hidden bg-black border border-emerald-500 relative shadow-inner shadow-black/50">
+               <video ref={(el) => {
+                 if (el && mediaStream && el.srcObject !== mediaStream) {
+                   el.srcObject = mediaStream;
+                   videoRef.current = el; // Bind to TFJS ref
+                 }
+               }} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]"></video>
+               <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse shadow-rose-500 shadow-sm"></div>
             </div>
 
-            <div className="flex-1">
-              {currentQ.type === 'NAT' ? (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 shadow-inner w-full max-w-sm">
-                  <label className="block text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">Enter Numerical Value:</label>
-                  <input 
-                    type="number" 
-                    value={answers[currentQIndex] || ''} 
-                    onChange={(e) => handleNatInput(e.target.value)} 
-                    className="w-full bg-white border-2 border-slate-300 rounded-xl p-4 text-2xl font-black text-slate-800 outline-none focus:border-indigo-500 shadow-sm transition" 
-                    placeholder="e.g. 4.5"
-                  />
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-4">
-                  {currentQ.options?.map((opt, idx) => {
-                    const isSelected = currentQ.type === 'MSQ' 
-                      ? (Array.isArray(answers[currentQIndex]) && answers[currentQIndex].includes(opt.id))
-                      : answers[currentQIndex] === opt.id;
-
-                    return (
-                      <label key={idx} className={`flex items-start gap-4 p-4 border-2 rounded-xl cursor-pointer transition-all shadow-sm ${isSelected ? 'border-indigo-600 bg-indigo-50 shadow-md' : 'border-slate-200 hover:border-slate-400 bg-white'}`}>
-                        <div className={`w-6 h-6 shrink-0 mt-0.5 flex items-center justify-center border-2 ${currentQ.type === 'MSQ' ? 'rounded' : 'rounded-full'} ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-400 text-transparent'}`}>
-                          <i className={`fas ${currentQ.type === 'MSQ' ? 'fa-check text-[10px]' : 'fa-circle text-[8px]'}`}></i>
-                        </div>
-                        <input 
-                          type={currentQ.type === 'MSQ' ? "checkbox" : "radio"} 
-                          checked={isSelected} 
-                          onChange={() => handleAnswerSelect(opt.id)} 
-                          className="hidden" 
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-bold text-slate-800 leading-relaxed"><Latex>{opt.text}</Latex></div>
-                          
-                          {/* Dedicated Option Diagram Container */}
-                          {opt.imageUrl && (
-                            <div className="mt-3 inline-block">
-                              <img src={opt.imageUrl} alt={`Option ${opt.id} Diagram`} className="max-h-32 object-contain border border-slate-200 rounded-lg p-1.5 bg-white shadow-sm pointer-events-none" draggable="false" />
-                            </div>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* BOTTOM CONTROLS */}
-            <div className="mt-8 pt-4 border-t border-slate-200 flex flex-wrap justify-between gap-4">
-              <div className="flex gap-3">
-                <button 
-                  onClick={toggleReview} 
-                  className={`px-4 py-2.5 rounded-xl text-xs font-black shadow-sm transition border ${markedForReview[currentQIndex] ? 'bg-purple-100 text-purple-700 border-purple-300' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
-                >
-                  <i className="fas fa-bookmark mr-1.5"></i> {markedForReview[currentQIndex] ? "Unmark Review" : "Mark for Review"}
-                </button>
-                <button onClick={clearResponse} className="bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-xs font-black shadow-sm hover:bg-slate-200 transition">
-                  Clear
-                </button>
-              </div>
-              
-              <div className="flex gap-3">
-                <button onClick={() => navigateTo(Math.max(0, currentQIndex - 1))} disabled={currentQIndex === 0} className="bg-slate-800 text-white px-6 py-2.5 rounded-xl text-sm font-black shadow-md hover:bg-slate-700 transition disabled:opacity-50">
-                  <i className="fas fa-arrow-left"></i>
-                </button>
-                <button onClick={() => navigateTo(Math.min(questions.length - 1, currentQIndex + 1))} disabled={currentQIndex === questions.length - 1} className="bg-indigo-600 text-white px-8 py-2.5 rounded-xl text-sm font-black shadow-md hover:bg-indigo-700 transition disabled:opacity-50">
-                  Next <i className="fas fa-arrow-right ml-2"></i>
-                </button>
-              </div>
+            {examData?.allowCalculator && (
+               <button onClick={() => setShowCalculator(!showCalculator)} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2">
+                 <i className="fas fa-calculator text-indigo-300"></i> <span className="hidden md:block">Calculator</span>
+               </button>
+            )}
+            <div className={`font-mono text-lg md:text-2xl font-black flex items-center gap-2 tracking-wider ${timeLeft < 300 ? 'text-rose-400 animate-pulse' : 'text-emerald-400'}`}>
+              <i className="far fa-clock"></i> {formatTime(timeLeft)}
             </div>
           </div>
-        </main>
+        </header>
 
-        {/* RIGHT: QUESTION PALETTE */}
-        <aside className="w-72 bg-slate-50 border-l border-slate-200 hidden lg:flex flex-col shrink-0">
+        <div className="flex-1 flex overflow-hidden">
           
-          <div className="p-4 grid grid-cols-2 gap-2 text-[10px] font-black uppercase tracking-wide border-b border-slate-200 bg-white">
-             <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-2 rounded-lg flex justify-between items-center">
-               <span>Answered</span> <span className="text-sm">{answeredCount}</span>
-             </div>
-             <div className="bg-rose-50 border border-rose-200 text-rose-700 p-2 rounded-lg flex justify-between items-center">
-               <span>Not Ans</span> <span className="text-sm">{notAnsweredCount}</span>
-             </div>
-             <div className="bg-slate-100 border border-slate-200 text-slate-600 p-2 rounded-lg flex justify-between items-center">
-               <span>Not Visit</span> <span className="text-sm">{notVisitedCount}</span>
-             </div>
-             <div className="bg-purple-50 border border-purple-200 text-purple-700 p-2 rounded-lg flex justify-between items-center">
-               <span>Review</span> <span className="text-sm">{markedCount}</span>
-             </div>
-          </div>
+          {/* LEFT: QUESTION AREA */}
+          <main className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col bg-white">
+            <div className="max-w-4xl w-full mx-auto flex-1 flex flex-col">
+              
+              <div className="flex justify-between items-center mb-6 border-b border-slate-200 pb-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl font-black text-slate-800">Question {currentQIndex + 1}</span>
+                  <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-black tracking-widest border border-slate-200">{currentQ.type}</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded text-xs font-black">+{currentQ.marks || 2}</span>
+                  <span className="text-rose-600 bg-rose-50 border border-rose-200 px-2 py-1 rounded text-xs font-black">-{currentQ.negativeMarks || 0.66}</span>
+                </div>
+              </div>
 
-          <div className="flex-1 overflow-y-auto p-4">
-            <h3 className="text-xs font-black text-slate-800 mb-3 uppercase tracking-widest">Question Palette</h3>
-            <div className="grid grid-cols-5 gap-2">
-              {questions.map((_, i) => {
-                const isAnswered = questions[i].type === 'MSQ' ? (Array.isArray(answers[i]) && answers[i].length > 0) : (answers[i] !== undefined && answers[i] !== "");
-                const isMarked = markedForReview[i];
-                const isVis = visited[i];
-                const isCurrent = currentQIndex === i;
+              {/* ⚡ THE ANTI-CAMERA SPOTLIGHT RENDERER ⚡ */}
+              <div 
+                ref={questionContainerRef}
+                className="mb-8 relative p-6 rounded-2xl overflow-hidden bg-white border border-slate-200"
+                style={examData?.spotlightMode ? { 
+                  '--x': `${mousePos.x}px`, 
+                  '--y': `${mousePos.y}px` 
+                } : {}}
+              >
                 
-                let btnStyle = "bg-white border-slate-300 text-slate-500"; 
-                if (isVis && !isAnswered) btnStyle = "bg-rose-100 border-rose-300 text-rose-700"; 
-                if (isAnswered) btnStyle = "bg-emerald-500 border-emerald-500 text-white"; 
-                if (isMarked) btnStyle = "bg-purple-500 border-purple-500 text-white"; 
-                if (isMarked && isAnswered) btnStyle = "bg-purple-600 border-purple-600 text-white shadow-[inset_0_-4px_0_0_#34d399]"; 
-
-                return (
-                  <button 
-                    key={i}
-                    onClick={() => navigateTo(i)}
-                    className={`h-10 rounded-lg text-xs font-black transition-all border-2 flex items-center justify-center shadow-sm relative
-                      ${btnStyle} 
-                      ${isCurrent ? 'ring-2 ring-indigo-500 ring-offset-2 scale-110 z-10' : 'hover:scale-105'}`}
+                {/* Spotlight Obfuscation Layer */}
+                {examData?.spotlightMode && hasStarted && (
+                  <div 
+                    className="absolute inset-0 z-50 pointer-events-none backdrop-blur-xl bg-slate-900/95"
+                    style={{
+                      maskImage: `radial-gradient(circle 120px at var(--x) var(--y), transparent 0%, black 100%)`,
+                      WebkitMaskImage: `radial-gradient(circle 120px at var(--x) var(--y), transparent 0%, black 100%)`
+                    }}
                   >
-                    {i + 1}
+                     <div className="absolute inset-0 flex items-center justify-center opacity-20">
+                        <span className="text-white font-black tracking-widest uppercase rotate-45 select-none">Move Mouse to Reveal</span>
+                     </div>
+                  </div>
+                )}
+                
+                <div className="font-bold text-slate-900 leading-relaxed text-lg whitespace-pre-wrap overflow-x-auto relative z-40">
+                  <Latex>{currentQ.text}</Latex>
+                </div>
+                
+                {/* Dedicated Question Diagram Container */}
+                {currentQ.imageUrl && (
+                  <div className="mt-6 p-3 border border-slate-200 rounded-xl bg-white inline-block shadow-sm relative z-40">
+                    <img src={currentQ.imageUrl} alt="Question Diagram" className="max-h-[350px] object-contain pointer-events-none" draggable="false" />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1">
+                {currentQ.type === 'NAT' ? (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 shadow-inner w-full max-w-sm">
+                    <label className="block text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">Enter Numerical Value:</label>
+                    <input 
+                      type="number" 
+                      value={answers[currentQIndex] || ''} 
+                      onChange={(e) => handleNatInput(e.target.value)} 
+                      className="w-full bg-white border-2 border-slate-300 rounded-xl p-4 text-2xl font-black text-slate-800 outline-none focus:border-indigo-500 shadow-sm transition" 
+                      placeholder="e.g. 4.5"
+                    />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4">
+                    {currentQ.options?.map((opt, idx) => {
+                      const isSelected = currentQ.type === 'MSQ' 
+                        ? (Array.isArray(answers[currentQIndex]) && answers[currentQIndex].includes(opt.id))
+                        : answers[currentQIndex] === opt.id;
+
+                      return (
+                        <label key={idx} className={`flex items-start gap-4 p-4 border-2 rounded-xl cursor-pointer transition-all shadow-sm ${isSelected ? 'border-indigo-600 bg-indigo-50 shadow-md' : 'border-slate-200 hover:border-slate-400 bg-white'}`}>
+                          <div className={`w-6 h-6 shrink-0 mt-0.5 flex items-center justify-center border-2 ${currentQ.type === 'MSQ' ? 'rounded' : 'rounded-full'} ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-400 text-transparent'}`}>
+                            <i className={`fas ${currentQ.type === 'MSQ' ? 'fa-check text-[10px]' : 'fa-circle text-[8px]'}`}></i>
+                          </div>
+                          <input 
+                            type={currentQ.type === 'MSQ' ? "checkbox" : "radio"} 
+                            checked={isSelected} 
+                            onChange={() => handleAnswerSelect(opt.id)} 
+                            className="hidden" 
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-bold text-slate-800 leading-relaxed"><Latex>{opt.text}</Latex></div>
+                            
+                            {/* Dedicated Option Diagram Container */}
+                            {opt.imageUrl && (
+                              <div className="mt-3 inline-block">
+                                <img src={opt.imageUrl} alt={`Option ${opt.id} Diagram`} className="max-h-32 object-contain border border-slate-200 rounded-lg p-1.5 bg-white shadow-sm pointer-events-none" draggable="false" />
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* BOTTOM CONTROLS */}
+              <div className="mt-8 pt-4 border-t border-slate-200 flex flex-wrap justify-between gap-4">
+                <div className="flex gap-3">
+                  <button 
+                    onClick={toggleReview} 
+                    className={`px-4 py-2.5 rounded-xl text-xs font-black shadow-sm transition border ${markedForReview[currentQIndex] ? 'bg-purple-100 text-purple-700 border-purple-300' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
+                  >
+                    <i className="fas fa-bookmark mr-1.5"></i> {markedForReview[currentQIndex] ? "Unmark Review" : "Mark for Review"}
                   </button>
-                );
-              })}
+                  <button onClick={clearResponse} className="bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-xs font-black shadow-sm hover:bg-slate-200 transition">
+                    Clear
+                  </button>
+                </div>
+                
+                <div className="flex gap-3">
+                  <button onClick={() => navigateTo(Math.max(0, currentQIndex - 1))} disabled={currentQIndex === 0} className="bg-slate-800 text-white px-6 py-2.5 rounded-xl text-sm font-black shadow-md hover:bg-slate-700 transition disabled:opacity-50">
+                    <i className="fas fa-arrow-left"></i>
+                  </button>
+                  <button onClick={() => navigateTo(Math.min(questions.length - 1, currentQIndex + 1))} disabled={currentQIndex === questions.length - 1} className="bg-indigo-600 text-white px-8 py-2.5 rounded-xl text-sm font-black shadow-md hover:bg-indigo-700 transition disabled:opacity-50">
+                    Next <i className="fas fa-arrow-right ml-2"></i>
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
+          </main>
 
-          <div className="p-4 border-t border-slate-200 bg-white">
-            <button onClick={() => setShowSubmitConfirm(true)} className="w-full bg-slate-900 hover:bg-black text-white py-3.5 rounded-xl text-sm font-black shadow-lg transition uppercase tracking-widest flex items-center justify-center gap-2">
-              <i className="fas fa-paper-plane"></i> Final Submit
-            </button>
-          </div>
-        </aside>
+          {/* RIGHT: QUESTION PALETTE */}
+          <aside className="w-72 bg-slate-50 border-l border-slate-200 hidden lg:flex flex-col shrink-0">
+            
+            <div className="p-4 grid grid-cols-2 gap-2 text-[10px] font-black uppercase tracking-wide border-b border-slate-200 bg-white">
+               <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-2 rounded-lg flex justify-between items-center">
+                 <span>Answered</span> <span className="text-sm">{answeredCount}</span>
+               </div>
+               <div className="bg-rose-50 border border-rose-200 text-rose-700 p-2 rounded-lg flex justify-between items-center">
+                 <span>Not Ans</span> <span className="text-sm">{notAnsweredCount}</span>
+               </div>
+               <div className="bg-slate-100 border border-slate-200 text-slate-600 p-2 rounded-lg flex justify-between items-center">
+                 <span>Not Visit</span> <span className="text-sm">{notVisitedCount}</span>
+               </div>
+               <div className="bg-purple-50 border border-purple-200 text-purple-700 p-2 rounded-lg flex justify-between items-center">
+                 <span>Review</span> <span className="text-sm">{markedCount}</span>
+               </div>
+            </div>
 
+            <div className="flex-1 overflow-y-auto p-4">
+              <h3 className="text-xs font-black text-slate-800 mb-3 uppercase tracking-widest">Question Palette</h3>
+              <div className="grid grid-cols-5 gap-2">
+                {questions.map((_, i) => {
+                  const isAnswered = questions[i].type === 'MSQ' ? (Array.isArray(answers[i]) && answers[i].length > 0) : (answers[i] !== undefined && answers[i] !== "");
+                  const isMarked = markedForReview[i];
+                  const isVis = visited[i];
+                  const isCurrent = currentQIndex === i;
+                  
+                  let btnStyle = "bg-white border-slate-300 text-slate-500"; 
+                  if (isVis && !isAnswered) btnStyle = "bg-rose-100 border-rose-300 text-rose-700"; 
+                  if (isAnswered) btnStyle = "bg-emerald-500 border-emerald-500 text-white"; 
+                  if (isMarked) btnStyle = "bg-purple-500 border-purple-500 text-white"; 
+                  if (isMarked && isAnswered) btnStyle = "bg-purple-600 border-purple-600 text-white shadow-[inset_0_-4px_0_0_#34d399]"; 
+
+                  return (
+                    <button 
+                      key={i}
+                      onClick={() => navigateTo(i)}
+                      className={`h-10 rounded-lg text-xs font-black transition-all border-2 flex items-center justify-center shadow-sm relative
+                        ${btnStyle} 
+                        ${isCurrent ? 'ring-2 ring-indigo-500 ring-offset-2 scale-110 z-10' : 'hover:scale-105'}`}
+                    >
+                      {i + 1}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-slate-200 bg-white">
+              <button onClick={() => setShowSubmitConfirm(true)} className="w-full bg-slate-900 hover:bg-black text-white py-3.5 rounded-xl text-sm font-black shadow-lg transition uppercase tracking-widest flex items-center justify-center gap-2">
+                <i className="fas fa-paper-plane"></i> Final Submit
+              </button>
+            </div>
+          </aside>
+
+        </div>
       </div>
     </div>
   );

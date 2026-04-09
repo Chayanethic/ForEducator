@@ -132,13 +132,15 @@ export default function ExamInterface() {
 
   // --- SECURITY STATE & REFS ---
   const videoRef = useRef(null); 
-  
   const [mediaStream, setMediaStream] = useState(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [violationCount, setViolationCount] = useState(0);
-
-  // This flag prevents false "Window Blur" alarms during the fullscreen transition
   const [isStrictProctoringActive, setIsStrictProctoringActive] = useState(false); 
+
+  // ⚡ NEW: VISUAL TRAP STATE ⚡
+  const [isBlurred, setIsBlurred] = useState(false);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const questionContainerRef = useRef(null);
 
   // --- AI PROCTORING STATE ---
   const [aiModel, setAiModel] = useState(null);
@@ -192,7 +194,6 @@ export default function ExamInterface() {
     }
   };
 
-  // --- CLEANUP CAMERA ON UNMOUNT ---
   useEffect(() => {
     return () => {
       if (mediaStream) {
@@ -211,26 +212,57 @@ export default function ExamInterface() {
     }
   }, [examPhase]);
 
-  // --- TAB SWITCH & SPLIT SCREEN DETECTION ---
+  // ⚡ TAB SWITCH & BLIND-BLUR EVENT LISTENER ⚡
   useEffect(() => {
     if (!isStrictProctoringActive || modal.show) return;
 
     const handleVisibilityChange = () => {
-      if (document.hidden) handleViolation("Tab Switch Detected");
+      if (document.hidden && mockDetails?.blockTabSwitch !== false) {
+        handleViolation("Tab Switch Detected");
+      }
     };
 
     const handleBlur = () => {
-      handleViolation("Window Lost Focus / Split Screen Detected");
+      if (mockDetails?.blockTabSwitch !== false) {
+        setIsBlurred(true);
+        handleViolation("Window Lost Focus / Split Screen Detected");
+      }
+    };
+
+    const handleFocus = () => {
+      if (mockDetails?.blockTabSwitch !== false) {
+        setIsBlurred(false);
+      }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
     };
-  }, [isStrictProctoringActive, modal.show]);
+  }, [isStrictProctoringActive, modal.show, mockDetails]);
+
+  // ⚡ SPOTLIGHT MOUSE TRACKER ⚡
+  useEffect(() => {
+    if (examPhase !== 'active' || !mockDetails?.spotlightMode) return;
+    
+    const handleMouseMove = (e) => {
+      if (questionContainerRef.current) {
+        const rect = questionContainerRef.current.getBoundingClientRect();
+        setMousePos({
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        });
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, [examPhase, mockDetails?.spotlightMode]);
 
   const handleViolation = (reason) => {
     setViolationCount(prev => {
@@ -265,7 +297,7 @@ export default function ExamInterface() {
   };
 
   const triggerExitWarning = () => {
-    if (!isStrictProctoringActive || modal.show) return;
+    if (!isStrictProctoringActive || modal.show || mockDetails?.blockTabSwitch === false) return;
     handleViolation("Exited Fullscreen Mode");
   };
 
@@ -288,7 +320,7 @@ export default function ExamInterface() {
     };
     document.addEventListener('fullscreenchange', handleFullScreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
-  }, [examPhase, isStrictProctoringActive]);
+  }, [examPhase, isStrictProctoringActive, mockDetails]);
 
   useEffect(() => {
     if (examPhase === 'active') {
@@ -301,7 +333,7 @@ export default function ExamInterface() {
       window.addEventListener('popstate', handlePopState);
       return () => window.removeEventListener('popstate', handlePopState);
     }
-  }, [examPhase, isStrictProctoringActive]);
+  }, [examPhase, isStrictProctoringActive, mockDetails]);
 
   const enterFullScreen = () => {
     const elem = document.documentElement;
@@ -322,8 +354,14 @@ export default function ExamInterface() {
     const fetchExamAndProgress = async () => {
       if (!mockId) return;
       try {
-        const mockRef = doc(db, "mock_exams", mockId);
-        const mockSnap = await getDoc(mockRef);
+        const mockRef = doc(db, "mocks", mockId); // Changed to 'mocks' to match educator output
+        let mockSnap = await getDoc(mockRef);
+        
+        // Fallback for older exams saved in 'mock_exams'
+        if (!mockSnap.exists()) {
+          const legacyRef = doc(db, "mock_exams", mockId);
+          mockSnap = await getDoc(legacyRef);
+        }
         
         if (!mockSnap.exists()) {
           showToast("Exam not found!", "error");
@@ -335,8 +373,15 @@ export default function ExamInterface() {
         setMockDetails(mockData);
         const initialDurationSeconds = (mockData.duration || 60) * 60;
 
-        const qRef = collection(db, "mock_exams", mockId, "questions");
-        const qSnap = await getDocs(qRef);
+        // Try both possible question collection paths
+        let qRef = collection(db, "mocks", mockId, "questions");
+        let qSnap = await getDocs(qRef);
+        
+        if (qSnap.empty) {
+          qRef = collection(db, "mock_exams", mockId, "questions");
+          qSnap = await getDocs(qRef);
+        }
+
         const fetchedQuestions = qSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setQuestions(fetchedQuestions);
         
@@ -395,20 +440,19 @@ export default function ExamInterface() {
     return () => clearInterval(timer);
   }, [examPhase, questions.length, isSubmittingEngine]);
 
-  // ⚡ UPDATED AI PROCTORING LOOP (ULTRA FAST + BLOCKED CAMERA DETECTION) ⚡
+  // ⚡ UPDATED AI PROCTORING LOOP (Respects Educator Toggles) ⚡
   useEffect(() => {
     if (!isStrictProctoringActive || modal.show || !aiModel || !isCameraActive) return;
 
-    let isDetecting = true; // Prevents overlapping frames and memory leaks
+    let isDetecting = true;
 
     const runAiDetection = async () => {
       if (!isDetecting || modal.show) return;
 
       if (videoRef.current && videoRef.current.readyState >= 2) {
         try {
-          // 1. HIDDEN/BLOCKED CAMERA CHECK (Uses HTML5 Canvas to read pixel brightness)
           const canvas = document.createElement("canvas");
-          canvas.width = 64; // Small resolution for rapid checking
+          canvas.width = 64; 
           canvas.height = 64;
           const ctx = canvas.getContext("2d", { willReadFrequently: true });
           ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
@@ -417,30 +461,29 @@ export default function ExamInterface() {
           let colorSum = 0;
           
           for (let i = 0; i < pixels.length; i += 4) {
-              // Get average of RGB channels
               colorSum += (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
           }
           const brightness = colorSum / (canvas.width * canvas.height);
           
+          // Hidden camera check is universal
           if (brightness < 12) { 
-            // If average pixel brightness is near black, camera is covered
             handleViolation("Camera Obstructed: Please ensure your face is clearly visible.");
           } else {
-            // 2. MOBILE PHONE & MULTIPLE PERSONS CHECK
             const predictions = await aiModel.detect(videoRef.current);
             let personCount = 0;
             let phoneDetected = false;
 
             predictions.forEach(prediction => {
-              if (prediction.score > 0.40) { // Aggressive threshold to catch split-second flashes
+              if (prediction.score > 0.40) { 
                 if (prediction.class === 'person') personCount++;
                 if (prediction.class === 'cell phone') phoneDetected = true;
               }
             });
 
-            if (phoneDetected) {
+            // ⚡ Respect Educator Settings ⚡
+            if (phoneDetected && mockDetails?.blockMobile !== false) {
               handleViolation("AI Detection: Mobile Phone or unauthorized device detected");
-            } else if (personCount > 1) {
+            } else if (personCount > 1 && mockDetails?.blockMultiple !== false) {
               handleViolation("AI Detection: Multiple persons detected in camera frame");
             }
           }
@@ -449,19 +492,17 @@ export default function ExamInterface() {
         }
       }
 
-      // Loop recursively for ultra-fast, non-overlapping detection (300ms)
       if (isDetecting) {
         setTimeout(runAiDetection, 300);
       }
     };
 
-    // Kickstart the loop
     runAiDetection();
 
     return () => {
-      isDetecting = false; // Clean up
+      isDetecting = false; 
     };
-  }, [isStrictProctoringActive, modal.show, aiModel, isCameraActive]);
+  }, [isStrictProctoringActive, modal.show, aiModel, isCameraActive, mockDetails]);
 
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600);
@@ -486,7 +527,6 @@ export default function ExamInterface() {
     enterFullScreen();
     setExamPhase('active');
     
-    // Ensure the stream is firmly attached when UI swaps over
     if (videoRef.current && mediaStream && videoRef.current.srcObject !== mediaStream) {
       videoRef.current.srcObject = mediaStream;
     }
@@ -653,6 +693,7 @@ export default function ExamInterface() {
   const executeSubmit = async () => {
     setExamPhase('submitting');
     exitFullScreen();
+    setIsBlurred(false);
     
     if (mediaStream) {
        mediaStream.getTracks().forEach(track => track.stop());
@@ -689,7 +730,6 @@ export default function ExamInterface() {
         }
       });
 
-      // NO SNAPSHOTS SAVED HERE
       await addDoc(collection(db, "results"), {
         studentId: user?.id || "anonymous", studentName: user?.fullName || "Student",
         studentEmail: user?.primaryEmailAddress?.emailAddress || "No Email", studentAvatar: user?.imageUrl || "",
@@ -745,9 +785,9 @@ export default function ExamInterface() {
                   This exam utilizes advanced AI computer vision. <strong>Webcam access is mandatory.</strong> The system actively scans for:
                 </p>
                 <ul className="list-disc pl-5 text-sm font-medium text-rose-900 mb-4 space-y-1">
-                  <li>Mobile phones or unauthorized devices in the frame.</li>
-                  <li>Multiple persons present in the camera view.</li>
-                  <li>Tab switching, window unfocusing, and exiting fullscreen.</li>
+                  {mockDetails?.blockMobile !== false && <li>Mobile phones or unauthorized devices in the frame.</li>}
+                  {mockDetails?.blockMultiple !== false && <li>Multiple persons present in the camera view.</li>}
+                  {mockDetails?.blockTabSwitch !== false && <li>Tab switching, window unfocusing, and exiting fullscreen.</li>}
                 </ul>
                 <p className="text-sm font-bold text-rose-900">3 violations will result in automatic test termination.</p>
                 
@@ -774,11 +814,9 @@ export default function ExamInterface() {
                 </div>
               </div>
 
-              {/* LIVE PREVIEW BOX IN INSTRUCTIONS */}
               {isCameraActive && (
                 <div className="w-full md:w-64 shrink-0 bg-slate-900 rounded-xl overflow-hidden border-2 border-emerald-500 shadow-lg relative flex flex-col">
                    <div className="bg-slate-800 text-white text-xs font-bold text-center py-1">Live Camera Preview</div>
-                   {/* ⚡ FIXED: Auto-attach stream on the instruction screen ⚡ */}
                    <video 
                      ref={(el) => {
                        if (el && mediaStream && el.srcObject !== mediaStream) {
@@ -863,11 +901,33 @@ export default function ExamInterface() {
   return (
     <div 
       ref={containerRef} 
-      className="bg-slate-50 text-slate-900 font-sans h-screen flex flex-col overflow-hidden select-none"
+      className="bg-slate-50 text-slate-900 font-sans h-screen flex flex-col overflow-hidden select-none relative"
       onContextMenu={(e) => e.preventDefault()} 
       onCopy={(e) => e.preventDefault()} 
     >
       
+      {/* ⚡ FORENSIC WATERMARK ⚡ */}
+      {mockDetails?.enableWatermark !== false && examPhase === 'active' && (
+        <div className="fixed inset-0 pointer-events-none z-[9998] opacity-[0.03] overflow-hidden flex flex-wrap justify-center items-center gap-10 rotate-[-25deg] select-none">
+          {Array.from({ length: 50 }).map((_, i) => (
+            <span key={i} className="text-2xl font-black text-slate-900 whitespace-nowrap">
+              {user?.primaryEmailAddress?.emailAddress || "Student"} • {user?.fullName || "Name"} • EXAM-{mockId.slice(-6)}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* ⚡ BLIND-BLUR LOCK SCREEN OVERLAY ⚡ */}
+      {isBlurred && mockDetails?.blockTabSwitch !== false && examPhase === 'active' && (
+        <div className="absolute inset-0 z-[99999] flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-xl animate-in fade-in duration-200">
+           <i className="fas fa-eye-slash text-7xl text-rose-500 mb-6 animate-pulse"></i>
+           <h2 className="text-4xl font-black text-white tracking-tight">Focus Lost</h2>
+           <p className="text-slate-300 font-bold mt-3 text-lg text-center max-w-md">
+             You have clicked outside the secure exam window. <br/> Return immediately.
+           </p>
+        </div>
+      )}
+
       <style dangerouslySetInnerHTML={{__html: `
         .clip-answered { clip-path: polygon(100% 0, 100% 75%, 50% 100%, 0 75%, 0 0); }
         .clip-not-answered { clip-path: polygon(100% 0, 100% 75%, 50% 100%, 0 75%, 0 0); }
@@ -912,255 +972,299 @@ export default function ExamInterface() {
         </div>
       )}
 
-      <header className="bg-slate-900 text-white p-3 flex justify-between items-center shrink-0 shadow-md z-20">
-        <div className="text-xl font-bold flex items-center gap-2">
-            <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
-        </div>
-        <div className="text-lg font-bold tracking-wide">
-            {mockDetails?.title || "Live Exam"}
-        </div>
-        <div className="flex items-center gap-4">
+      <div className={`flex-1 flex flex-col h-full overflow-hidden transition-all duration-100 ${isBlurred && mockDetails?.blockTabSwitch !== false ? 'blur-xl grayscale pointer-events-none' : ''}`}>
+
+        <header className="bg-slate-900 text-white p-3 flex justify-between items-center shrink-0 shadow-md z-20">
+          <div className="text-xl font-bold flex items-center gap-2">
+              <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
+          </div>
+          <div className="text-lg font-bold tracking-wide">
+              {mockDetails?.title || "Live Exam"}
+          </div>
+          <div className="flex items-center gap-4">
+              
+              <div className="flex flex-col items-end mr-2">
+                <span className={`text-[10px] font-bold tracking-widest uppercase ${isStrictProctoringActive ? 'text-emerald-400' : 'text-amber-400 animate-pulse'}`}>
+                  {isStrictProctoringActive ? 'Strict Mode ON' : 'Initializing...'}
+                </span>
+                <div className="flex items-center gap-1.5 text-xs text-slate-300">
+                  <i className="fas fa-brain text-indigo-400"></i> AI Scanning
+                </div>
+              </div>
+
+              {/* LARGER VISIBLE CAMERA FEED */}
+              <div className="w-24 h-16 rounded overflow-hidden bg-black border-2 border-emerald-500 relative shadow-inner shadow-black/50">
+                 {/* ⚡ ACTIVE EXAM FEED ⚡ */}
+                 <video 
+                   ref={(el) => {
+                     if (el && mediaStream && el.srcObject !== mediaStream) {
+                       el.srcObject = mediaStream;
+                       videoRef.current = el; // Bind to TFJS ref
+                     }
+                   }} 
+                   autoPlay playsInline muted 
+                   className="w-full h-full object-cover transform scale-x-[-1]"
+                 ></video>
+                 <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse shadow-rose-500 shadow-sm"></div>
+              </div>
+
+              {mockDetails?.allowCalculator !== false && (
+                <button onClick={() => setShowCalculator(!showCalculator)} className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition border ${showCalculator ? 'bg-indigo-600 text-white border-indigo-500 shadow-inner' : 'bg-slate-800 text-slate-200 hover:bg-slate-700 border-slate-700'}`}>
+                    <i className="fas fa-calculator text-indigo-300"></i> Calculator
+                </button>
+              )}
+          </div>
+        </header>
+
+        <div className="flex flex-1 overflow-hidden transition-all">
+          
+          <main className="flex-1 flex flex-col bg-white border-r border-slate-300 relative">
             
-            <div className="flex flex-col items-end mr-2">
-              <span className={`text-[10px] font-bold tracking-widest uppercase ${isStrictProctoringActive ? 'text-emerald-400' : 'text-amber-400 animate-pulse'}`}>
-                {isStrictProctoringActive ? 'Strict Mode ON' : 'Initializing...'}
-              </span>
-              <div className="flex items-center gap-1.5 text-xs text-slate-300">
-                <i className="fas fa-brain text-indigo-400"></i> AI Scanning
+            <div className="bg-slate-100 pt-2 px-2 flex justify-between items-end border-b border-slate-300 shrink-0">
+              <div className="flex gap-1 overflow-x-auto">
+                {uniqueSections.map((sec) => (
+                  <button key={sec} onClick={() => handleSectionTabClick(sec)} className={`px-5 py-2.5 text-sm font-bold rounded-t-xl transition-colors border border-b-0 ${activeSection === sec ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50 shadow-inner'}`}>
+                    {sec}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3 pr-4 pb-1">
+                  <span className="text-slate-500 text-sm font-bold uppercase tracking-wide">Time Left:</span>
+                  <div className={`px-4 py-1.5 rounded-lg text-lg font-mono font-black shadow-inner border ${timeLeft < 300 ? 'bg-rose-100 text-rose-700 border-rose-300 animate-pulse' : 'bg-slate-800 text-white border-slate-900'}`}>
+                      {formatTime(timeLeft)}
+                  </div>
               </div>
             </div>
 
-            {/* LARGER VISIBLE CAMERA FEED */}
-            <div className="w-24 h-16 rounded overflow-hidden bg-black border-2 border-emerald-500 relative shadow-inner shadow-black/50">
-               {/* ⚡ ACTIVE EXAM FEED ⚡ */}
-               <video 
-                 ref={(el) => {
-                   if (el && mediaStream && el.srcObject !== mediaStream) {
-                     el.srcObject = mediaStream;
-                     videoRef.current = el; // Bind to TFJS ref
-                   }
-                 }} 
-                 autoPlay playsInline muted 
-                 className="w-full h-full object-cover transform scale-x-[-1]"
-               ></video>
-               <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse shadow-rose-500 shadow-sm"></div>
+            <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-indigo-50 shrink-0">
+              <div className="flex items-center gap-4">
+                 <h2 className="text-lg font-black text-slate-800">Question No. {localQuestionNumber || 1}</h2>
+                 <span className="px-3 py-1 bg-white text-indigo-600 rounded-lg text-xs font-black uppercase tracking-wider border border-indigo-200 shadow-sm">{currentQType}</span>
+              </div>
+              
+              <div className="flex gap-6 text-sm font-bold text-slate-600 bg-white px-4 py-1.5 rounded-full border border-indigo-100 shadow-sm">
+                  <div className="flex items-center gap-1"><i className="fas fa-plus-circle text-emerald-500"></i> {currentQ.marks || 2} Marks</div>
+                  <div className="flex items-center gap-1"><i className="fas fa-minus-circle text-rose-500"></i> {currentQ.negativeMarks || 0.66} Marks</div>
+              </div>
             </div>
 
-            {mockDetails?.allowCalculator !== false && (
-              <button onClick={() => setShowCalculator(!showCalculator)} className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition border ${showCalculator ? 'bg-indigo-600 text-white border-indigo-500 shadow-inner' : 'bg-slate-800 text-slate-200 hover:bg-slate-700 border-slate-700'}`}>
-                  <i className="fas fa-calculator text-indigo-300"></i> Calculator
-              </button>
-            )}
-        </div>
-      </header>
+            <div className="flex-1 overflow-y-auto p-8 text-base">
+              <div className="max-w-4xl mx-auto">
+                  
+                  {/* ⚡ THE ANTI-CAMERA SPOTLIGHT RENDERER ⚡ */}
+                  <div 
+                    ref={questionContainerRef}
+                    className="mb-8 relative p-6 rounded-2xl overflow-hidden bg-white border border-slate-200"
+                    style={mockDetails?.spotlightMode ? { 
+                      '--x': `${mousePos.x}px`, 
+                      '--y': `${mousePos.y}px` 
+                    } : {}}
+                  >
+                    
+                    {/* Spotlight Obfuscation Layer */}
+                    {mockDetails?.spotlightMode && (
+                      <>
+                        <div 
+                          className="absolute inset-0 pointer-events-none z-20 mix-blend-difference opacity-40"
+                          style={{
+                            backgroundImage: `repeating-linear-gradient(0deg, transparent, transparent 1px, #000 1px, #000 2px), repeating-linear-gradient(90deg, transparent, transparent 1px, #000 1px, #000 2px)`,
+                            backgroundSize: '3px 3px'
+                          }}
+                        ></div>
+                        <div className="absolute inset-0 pointer-events-none z-10 bg-gradient-to-br from-indigo-500/5 via-transparent to-emerald-500/5 mix-blend-overlay"></div>
+                        <div className="absolute inset-0 pointer-events-none z-30 opacity-[0.08] overflow-hidden break-all font-mono text-[8px] leading-tight text-slate-900 select-none flex flex-wrap" aria-hidden="true">
+                          {Array.from({ length: 200 }).map((_, i) => (
+                            <span key={i}>{(Math.random() + 1).toString(36).substring(2)} </span>
+                          ))}
+                        </div>
 
-      <div className={`flex flex-1 overflow-hidden ${modal.show ? 'filter blur-sm pointer-events-none' : ''} transition-all`}>
-        
-        <main className="flex-1 flex flex-col bg-white border-r border-slate-300 relative">
-          
-          <div className="bg-slate-100 pt-2 px-2 flex justify-between items-end border-b border-slate-300 shrink-0">
-            <div className="flex gap-1 overflow-x-auto">
-              {uniqueSections.map((sec) => (
-                <button key={sec} onClick={() => handleSectionTabClick(sec)} className={`px-5 py-2.5 text-sm font-bold rounded-t-xl transition-colors border border-b-0 ${activeSection === sec ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50 shadow-inner'}`}>
-                  {sec}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-3 pr-4 pb-1">
-                <span className="text-slate-500 text-sm font-bold uppercase tracking-wide">Time Left:</span>
-                <div className={`px-4 py-1.5 rounded-lg text-lg font-mono font-black shadow-inner border ${timeLeft < 300 ? 'bg-rose-100 text-rose-700 border-rose-300 animate-pulse' : 'bg-slate-800 text-white border-slate-900'}`}>
-                    {formatTime(timeLeft)}
-                </div>
-            </div>
-          </div>
-
-          <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-indigo-50 shrink-0">
-            <div className="flex items-center gap-4">
-               <h2 className="text-lg font-black text-slate-800">Question No. {localQuestionNumber || 1}</h2>
-               <span className="px-3 py-1 bg-white text-indigo-600 rounded-lg text-xs font-black uppercase tracking-wider border border-indigo-200 shadow-sm">{currentQType}</span>
-            </div>
-            
-            <div className="flex gap-6 text-sm font-bold text-slate-600 bg-white px-4 py-1.5 rounded-full border border-indigo-100 shadow-sm">
-                <div className="flex items-center gap-1"><i className="fas fa-plus-circle text-emerald-500"></i> {currentQ.marks || 2} Marks</div>
-                <div className="flex items-center gap-1"><i className="fas fa-minus-circle text-rose-500"></i> {currentQ.negativeMarks || 0.66} Marks</div>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-8 text-base">
-            <div className="max-w-4xl mx-auto">
-                <div className="mb-8">
-                  <div className="font-bold text-slate-900 leading-relaxed text-lg whitespace-pre-wrap overflow-x-auto">
-                    <Latex>{currentQ.text}</Latex>
+                        <div 
+                          className="absolute inset-0 z-50 pointer-events-none backdrop-blur-xl bg-slate-900/95"
+                          style={{
+                            maskImage: `radial-gradient(circle 120px at var(--x) var(--y), transparent 0%, black 100%)`,
+                            WebkitMaskImage: `radial-gradient(circle 120px at var(--x) var(--y), transparent 0%, black 100%)`
+                          }}
+                        >
+                           <div className="absolute inset-0 flex items-center justify-center opacity-20">
+                              <span className="text-white font-black tracking-widest uppercase rotate-45 select-none">Move Mouse to Reveal</span>
+                           </div>
+                        </div>
+                      </>
+                    )}
+                    
+                    <div className={`font-bold text-slate-900 leading-relaxed text-lg whitespace-pre-wrap overflow-x-auto relative z-40 ${mockDetails?.spotlightMode ? 'drop-shadow-sm' : ''}`}>
+                      <Latex>{currentQ.text}</Latex>
+                    </div>
+                    
+                    {currentQ.imageUrl && (
+                      <div className="mt-6 p-3 border border-slate-200 rounded-xl bg-white inline-block shadow-sm relative z-40">
+                        <img src={currentQ.imageUrl} alt="Question Diagram" className="max-h-[350px] object-contain pointer-events-none" draggable="false" />
+                      </div>
+                    )}
                   </div>
                   
-                  {currentQ.imageUrl && (
-                    <div className="mt-4 p-3 border border-slate-200 rounded-xl bg-slate-50 inline-block shadow-sm">
-                      <img src={currentQ.imageUrl} alt="Question Diagram" className="max-h-[350px] object-contain pointer-events-none" draggable="false" />
+                  {currentQType === 'NAT' ? (
+                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 mt-6 shadow-inner w-full max-w-sm">
+                      <label className="block text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">Enter Numerical Value:</label>
+                      <input 
+                        type="number" 
+                        value={answers[currentIndex] || ''} 
+                        onChange={(e) => handleAnswerChange(e.target.value, 'NAT')}
+                        className="w-full bg-white border-2 border-slate-300 rounded-xl p-4 text-2xl font-black text-slate-800 outline-none focus:border-indigo-500 shadow-sm transition"
+                        placeholder="e.g. 4.5"
+                      />
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                        {currentQ.options?.map((opt, i) => {
+                          const isSelected = currentQType === 'MSQ' 
+                            ? (Array.isArray(answers[currentIndex]) && answers[currentIndex].includes(opt.id))
+                            : answers[currentIndex] === opt.id;
+
+                          return (
+                            <label key={i} className={`flex items-start gap-4 p-4 border-2 rounded-xl cursor-pointer transition-all shadow-sm ${isSelected ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-slate-300 bg-white'}`}>
+                                <input 
+                                  type={currentQType === 'MSQ' ? "checkbox" : "radio"} 
+                                  name={currentQType === 'MSQ' ? `q-${currentIndex}-${i}` : `q-${currentIndex}`} 
+                                  checked={isSelected} 
+                                  onChange={() => handleAnswerChange(opt.id, currentQType)} 
+                                  className={`mt-1 w-5 h-5 cursor-pointer shrink-0 accent-indigo-600 ${currentQType === 'MSQ' ? 'rounded-sm' : ''}`} 
+                                />
+                                <div className="flex-1 overflow-x-auto">
+                                  <div className="font-bold text-slate-800 text-base"><Latex>{opt.text}</Latex></div>
+                                  
+                                  {opt.imageUrl && (
+                                    <div className="mt-3 inline-block">
+                                      <img src={opt.imageUrl} alt={`Option ${opt.id} Diagram`} className="max-h-32 object-contain border border-slate-200 rounded-lg p-1.5 bg-white shadow-sm pointer-events-none" draggable="false" />
+                                    </div>
+                                  )}
+                                </div>
+                            </label>
+                          )
+                        })}
                     </div>
                   )}
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-100 border-t border-slate-300 flex justify-between items-center shrink-0">
+              <div className="flex gap-3">
+                  <button onClick={clearResponse} className="bg-white border border-slate-300 text-slate-700 px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-50 shadow-sm transition">
+                      Clear Response
+                  </button>
+                  <button onClick={markAndNext} className="bg-amber-500 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-amber-600 shadow-sm transition">
+                      Mark for Review & Next
+                  </button>
+              </div>
+              <button onClick={saveAndNext} className="bg-emerald-600 text-white px-8 py-2.5 rounded-lg text-sm font-bold hover:bg-emerald-700 shadow-sm transition flex items-center gap-2">
+                  Save & Next <i className="fas fa-chevron-right text-xs"></i>
+              </button>
+            </div>
+          </main>
+
+          <aside className="w-[320px] bg-slate-50 flex flex-col shrink-0 border-l border-slate-200 overflow-hidden">
+            <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-4 shrink-0">
+              <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Student&background=4F46E5&color=fff"} alt="Candidate" className="w-14 h-14 rounded-lg border border-slate-200 shadow-sm pointer-events-none" />
+              <div>
+                  <div className="text-[10px] text-slate-400 uppercase tracking-widest font-black mb-0.5">Candidate</div>
+                  <div className="text-sm font-bold text-slate-800 truncate w-48">{user?.fullName || "Student"}</div>
+              </div>
+            </div>
+
+            <div className="p-4 border-b border-slate-200 bg-white shrink-0">
+              <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+                <span className="text-xs font-black text-slate-700 uppercase tracking-widest">Total Questions</span>
+                <span className="text-sm font-black text-indigo-700 bg-indigo-100/50 border border-indigo-200 px-3 py-1 rounded-lg">{questions.length}</span>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-y-3 gap-x-3">
+                <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 bg-emerald-500 clip-answered shadow-sm"></div>
+                    <span className="text-[10px] font-bold text-slate-600 uppercase">Answered</span>
+                  </div>
+                  <span className="text-xs font-black text-slate-900">{getStatusCount('answered')}</span>
                 </div>
                 
-                {currentQType === 'NAT' ? (
-                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 mt-6 shadow-inner w-full max-w-sm">
-                    <label className="block text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">Enter Numerical Value:</label>
-                    <input 
-                      type="number" 
-                      value={answers[currentIndex] || ''} 
-                      onChange={(e) => handleAnswerChange(e.target.value, 'NAT')}
-                      className="w-full bg-white border-2 border-slate-300 rounded-xl p-4 text-2xl font-black text-slate-800 outline-none focus:border-indigo-500 shadow-sm transition"
-                      placeholder="e.g. 4.5"
-                    />
+                <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 bg-rose-500 clip-not-answered shadow-sm"></div>
+                    <span className="text-[10px] font-bold text-slate-600 uppercase">Not Ans</span>
                   </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                      {currentQ.options?.map((opt, i) => {
-                        const isSelected = currentQType === 'MSQ' 
-                          ? (Array.isArray(answers[currentIndex]) && answers[currentIndex].includes(opt.id))
-                          : answers[currentIndex] === opt.id;
-
-                        return (
-                          <label key={i} className={`flex items-start gap-4 p-4 border-2 rounded-xl cursor-pointer transition-all shadow-sm ${isSelected ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-slate-300 bg-white'}`}>
-                              <input 
-                                type={currentQType === 'MSQ' ? "checkbox" : "radio"} 
-                                name={currentQType === 'MSQ' ? `q-${currentIndex}-${i}` : `q-${currentIndex}`} 
-                                checked={isSelected} 
-                                onChange={() => handleAnswerChange(opt.id, currentQType)} 
-                                className={`mt-1 w-5 h-5 cursor-pointer shrink-0 accent-indigo-600 ${currentQType === 'MSQ' ? 'rounded-sm' : ''}`} 
-                              />
-                              <div className="flex-1 overflow-x-auto">
-                                <div className="font-bold text-slate-800 text-base"><Latex>{opt.text}</Latex></div>
-                                
-                                {opt.imageUrl && (
-                                  <div className="mt-3 inline-block">
-                                    <img src={opt.imageUrl} alt={`Option ${opt.id} Diagram`} className="max-h-32 object-contain border border-slate-200 rounded-lg p-1.5 bg-white shadow-sm pointer-events-none" draggable="false" />
-                                  </div>
-                                )}
-                              </div>
-                          </label>
-                        )
-                      })}
+                  <span className="text-xs font-black text-slate-900">{getStatusCount('not-answered')}</span>
+                </div>
+                
+                <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 bg-white border border-slate-300 rounded shadow-sm"></div>
+                    <span className="text-[10px] font-bold text-slate-600 uppercase">Not Visited</span>
                   </div>
-                )}
-            </div>
-          </div>
-
-          <div className="p-4 bg-slate-100 border-t border-slate-300 flex justify-between items-center shrink-0">
-            <div className="flex gap-3">
-                <button onClick={clearResponse} className="bg-white border border-slate-300 text-slate-700 px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-50 shadow-sm transition">
-                    Clear Response
-                </button>
-                <button onClick={markAndNext} className="bg-amber-500 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-amber-600 shadow-sm transition">
-                    Mark for Review & Next
-                </button>
-            </div>
-            <button onClick={saveAndNext} className="bg-emerald-600 text-white px-8 py-2.5 rounded-lg text-sm font-bold hover:bg-emerald-700 shadow-sm transition flex items-center gap-2">
-                Save & Next <i className="fas fa-chevron-right text-xs"></i>
-            </button>
-          </div>
-        </main>
-
-        <aside className="w-[320px] bg-slate-50 flex flex-col shrink-0 border-l border-slate-200 overflow-hidden">
-          <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-4 shrink-0">
-            <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Student&background=4F46E5&color=fff"} alt="Candidate" className="w-14 h-14 rounded-lg border border-slate-200 shadow-sm pointer-events-none" />
-            <div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-widest font-black mb-0.5">Candidate</div>
-                <div className="text-sm font-bold text-slate-800 truncate w-48">{user?.fullName || "Student"}</div>
-            </div>
-          </div>
-
-          <div className="p-4 border-b border-slate-200 bg-white shrink-0">
-            <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
-              <span className="text-xs font-black text-slate-700 uppercase tracking-widest">Total Questions</span>
-              <span className="text-sm font-black text-indigo-700 bg-indigo-100/50 border border-indigo-200 px-3 py-1 rounded-lg">{questions.length}</span>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-y-3 gap-x-3">
-              <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 bg-emerald-500 clip-answered shadow-sm"></div>
-                  <span className="text-[10px] font-bold text-slate-600 uppercase">Answered</span>
+                  <span className="text-xs font-black text-slate-900">{getStatusCount('not-visited')}</span>
                 </div>
-                <span className="text-xs font-black text-slate-900">{getStatusCount('answered')}</span>
+                
+                <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 bg-indigo-600 rounded-full shadow-sm"></div>
+                    <span className="text-[10px] font-bold text-slate-600 uppercase">Marked</span>
+                  </div>
+                  <span className="text-xs font-black text-slate-900">{getStatusCount('marked')}</span>
+                </div>
               </div>
-              
-              <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 bg-rose-500 clip-not-answered shadow-sm"></div>
-                  <span className="text-[10px] font-bold text-slate-600 uppercase">Not Ans</span>
+
+              <div className="mt-3 bg-slate-50 border border-slate-100 p-3 rounded-lg flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 bg-indigo-600 rounded-full relative flex shrink-0 shadow-sm after:absolute after:bottom-0 after:right-0 after:w-2 after:h-2 after:bg-emerald-400 after:rounded-full after:border border-white"></div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-slate-700 uppercase">Ans & Marked</span>
+                    <span className="text-[8px] text-slate-500 font-medium tracking-wide">Will be evaluated</span>
+                  </div>
                 </div>
-                <span className="text-xs font-black text-slate-900">{getStatusCount('not-answered')}</span>
-              </div>
-              
-              <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 bg-white border border-slate-300 rounded shadow-sm"></div>
-                  <span className="text-[10px] font-bold text-slate-600 uppercase">Not Visited</span>
-                </div>
-                <span className="text-xs font-black text-slate-900">{getStatusCount('not-visited')}</span>
-              </div>
-              
-              <div className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 bg-indigo-600 rounded-full shadow-sm"></div>
-                  <span className="text-[10px] font-bold text-slate-600 uppercase">Marked</span>
-                </div>
-                <span className="text-xs font-black text-slate-900">{getStatusCount('marked')}</span>
+                <span className="text-sm font-black text-slate-900">{getStatusCount('answered-marked')}</span>
               </div>
             </div>
 
-            <div className="mt-3 bg-slate-50 border border-slate-100 p-3 rounded-lg flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-6 h-6 bg-indigo-600 rounded-full relative flex shrink-0 shadow-sm after:absolute after:bottom-0 after:right-0 after:w-2 after:h-2 after:bg-emerald-400 after:rounded-full after:border border-white"></div>
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-bold text-slate-700 uppercase">Ans & Marked</span>
-                  <span className="text-[8px] text-slate-500 font-medium tracking-wide">Will be evaluated</span>
-                </div>
-              </div>
-              <span className="text-sm font-black text-slate-900">{getStatusCount('answered-marked')}</span>
+            <div className="bg-indigo-600 text-white py-3 px-5 text-sm font-bold flex justify-between items-center shadow-sm z-10 shrink-0">
+              <span>{activeSection}</span>
+              <span className="bg-indigo-800 px-2 py-0.5 rounded text-xs">{currentSectionQuestions.length} Qs</span>
             </div>
-          </div>
 
-          <div className="bg-indigo-600 text-white py-3 px-5 text-sm font-bold flex justify-between items-center shadow-sm z-10 shrink-0">
-            <span>{activeSection}</span>
-            <span className="bg-indigo-800 px-2 py-0.5 rounded text-xs">{currentSectionQuestions.length} Qs</span>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-5 bg-slate-100/50">
-            <div className="grid grid-cols-5 gap-3">
-              {currentSectionQuestions.map((q, localIndex) => {
-                const isCurrent = q.globalIndex === currentIndex;
-                return (
-                  <div 
-                    key={q.globalIndex} 
-                    className={`relative flex items-center justify-center w-12 h-12 rounded-lg transition-all 
-                      ${isCurrent ? 'bg-slate-300 border-2 border-slate-500 shadow-inner' : ''}
-                    `}
-                  >
-                    <button 
-                      onClick={() => navigateQuestion(q.globalIndex)}
-                      className={`w-10 h-10 font-black flex items-center justify-center transition-transform shadow-sm
-                        ${getPaletteClass(statuses[q.globalIndex])}
-                        ${isCurrent ? 'scale-105 z-10 shadow-md' : 'hover:opacity-80 hover:scale-105'}
+            <div className="flex-1 overflow-y-auto p-5 bg-slate-100/50">
+              <div className="grid grid-cols-5 gap-3">
+                {currentSectionQuestions.map((q, localIndex) => {
+                  const isCurrent = q.globalIndex === currentIndex;
+                  return (
+                    <div 
+                      key={q.globalIndex} 
+                      className={`relative flex items-center justify-center w-12 h-12 rounded-lg transition-all 
+                        ${isCurrent ? 'bg-slate-300 border-2 border-slate-500 shadow-inner' : ''}
                       `}
                     >
-                      {localIndex + 1}
-                    </button>
-                  </div>
-                )
-              })}
+                      <button 
+                        onClick={() => navigateQuestion(q.globalIndex)}
+                        className={`w-10 h-10 font-black flex items-center justify-center transition-transform shadow-sm
+                          ${getPaletteClass(statuses[q.globalIndex])}
+                          ${isCurrent ? 'scale-105 z-10 shadow-md' : 'hover:opacity-80 hover:scale-105'}
+                        `}
+                      >
+                        {localIndex + 1}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
-          </div>
 
-          <div className="p-5 bg-white border-t border-slate-200 flex justify-center shrink-0">
-            <button 
-              onClick={triggerSubmitConfirmation}
-              className="w-full bg-indigo-600 text-white py-3.5 rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition transform hover:-translate-y-0.5"
-            >
-                Submit Exam
-            </button>
-          </div>
-        </aside>
+            <div className="p-5 bg-white border-t border-slate-200 flex justify-center shrink-0">
+              <button 
+                onClick={triggerSubmitConfirmation}
+                className="w-full bg-indigo-600 text-white py-3.5 rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition transform hover:-translate-y-0.5"
+              >
+                  Submit Exam
+              </button>
+            </div>
+          </aside>
 
+        </div>
       </div>
     </div>
   );

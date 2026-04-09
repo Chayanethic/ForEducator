@@ -149,7 +149,26 @@ export default function CreateMockPage() {
   const [availability, setAvailability] = useState("always");
   const [examSections, setExamSections] = useState([{ name: "General", count: 0 }]);
 
+  // ⚡ NEW: SECURITY SETTINGS ⚡
+  const [blockMobile, setBlockMobile] = useState(true);
+  const [blockMultiple, setBlockMultiple] = useState(true);
+  const [blockTabSwitch, setBlockTabSwitch] = useState(true);
+  const [enableWatermark, setEnableWatermark] = useState(true);
+  const [spotlightMode, setSpotlightMode] = useState(false);
+
   const [showDraftModal, setShowDraftModal] = useState(false);
+  const [showDeployConfirm, setShowDeployConfirm] = useState(false);
+
+  const isAllStrict = blockMobile && blockMultiple && blockTabSwitch && enableWatermark && spotlightMode;
+
+  const toggleAllSecurity = () => {
+    const newState = !isAllStrict;
+    setBlockMobile(newState);
+    setBlockMultiple(newState);
+    setBlockTabSwitch(newState);
+    setEnableWatermark(newState);
+    setSpotlightMode(newState);
+  };
 
   const showToast = (message, type = "success") => {
     setToast({ show: true, message, type });
@@ -170,6 +189,13 @@ export default function CreateMockPage() {
             if (parsed.allowCalculator !== undefined) setAllowCalculator(parsed.allowCalculator);
             if (parsed.visibility) setVisibility(parsed.visibility);
             if (parsed.availability) setAvailability(parsed.availability);
+            
+            if (parsed.blockMobile !== undefined) setBlockMobile(parsed.blockMobile);
+            if (parsed.blockMultiple !== undefined) setBlockMultiple(parsed.blockMultiple);
+            if (parsed.blockTabSwitch !== undefined) setBlockTabSwitch(parsed.blockTabSwitch);
+            if (parsed.enableWatermark !== undefined) setEnableWatermark(parsed.enableWatermark);
+            if (parsed.spotlightMode !== undefined) setSpotlightMode(parsed.spotlightMode);
+
             showToast("Workspace restored from draft!", "success");
           }
         } catch (e) {
@@ -189,7 +215,8 @@ export default function CreateMockPage() {
 
   const saveDraftAndLeave = () => {
     const draftData = {
-      examTitle, examCategory, duration, allowCalculator, visibility, availability, questions
+      examTitle, examCategory, duration, allowCalculator, visibility, availability, questions,
+      blockMobile, blockMultiple, blockTabSwitch, enableWatermark, spotlightMode
     };
     localStorage.setItem(`ozone_mock_draft_${user.id}`, JSON.stringify(draftData));
     router.push('/educator/dashboard');
@@ -211,6 +238,154 @@ export default function CreateMockPage() {
         setPdfUrl(null); 
       }
     }
+  };
+
+  // ⚡ --- BULK CSV UPLOAD LOGIC --- ⚡
+  const parseCSV = (text) => {
+    const result = [];
+    let row = [];
+    let inQuotes = false;
+    let val = "";
+    for (let i = 0; i < text.length; i++) {
+      let char = text[i];
+      if (inQuotes) {
+        if (char === '"') {
+          if (i < text.length - 1 && text[i + 1] === '"') { val += '"'; i++; } 
+          else { inQuotes = false; }
+        } else { val += char; }
+      } else {
+        if (char === '"') { inQuotes = true; }
+        else if (char === ',') { row.push(val); val = ""; }
+        else if (char === '\n' || char === '\r') {
+          row.push(val); val = "";
+          if (row.length > 1 || row[0] !== "") result.push(row);
+          row = [];
+          if (char === '\r' && i < text.length - 1 && text[i + 1] === '\n') i++; 
+        } else { val += char; }
+      }
+    }
+    if (val || row.length > 0) { row.push(val); result.push(row); }
+    return result;
+  };
+
+  const handleCsvUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsProcessing(true);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const csvData = parseCSV(event.target.result);
+        const parsedQs = [];
+
+        for (let i = 0; i < csvData.length; i++) {
+          const row = csvData[i];
+          
+          if (row.length < 2 || !row[1] || row[1].trim() === "") continue; 
+
+          const qTypeRaw = row[0]?.toUpperCase().trim();
+          if (!['MCQ', 'MSQ', 'NAT'].includes(qTypeRaw)) continue;
+
+          const qType = qTypeRaw;
+          const qText = row[1] || '';
+          const optA = row[2] || '';
+          const optB = row[3] || '';
+          const optC = row[4] || '';
+          const optD = row[5] || '';
+          let correctAns = row[6]?.trim() || '';
+          const marks = parseFloat(row[7]) || 2;
+          const negMarks = parseFloat(row[8]) || 0.66;
+          const explanation = row[9] || '';
+
+          if (qType === 'MSQ') {
+             correctAns = correctAns.split(',').map(s => s.trim().toUpperCase());
+          }
+
+          parsedQs.push({
+            text: qText,
+            type: qType,
+            hasImage: false,
+            imageUrl: null,
+            options: qType === 'NAT' ? [] : [
+              { id: "A", text: optA, imageUrl: null },
+              { id: "B", text: optB, imageUrl: null },
+              { id: "C", text: optC, imageUrl: null },
+              { id: "D", text: optD, imageUrl: null }
+            ],
+            correctAnswer: correctAns,
+            explanation: explanation,
+            explanationImage: null,
+            marks: marks,
+            negativeMarks: negMarks,
+            isGeneratingOptions: false,
+            isGeneratingSolution: false
+          });
+        }
+
+        if (parsedQs.length > 0) {
+          setQuestions(prev => [...prev, ...parsedQs]);
+          setExpandedQIndex(questions.length); 
+          showToast(`Successfully imported ${parsedQs.length} questions from CSV!`, "success");
+        } else {
+          showToast("No valid questions found. Ensure Column A is MCQ, MSQ, or NAT.", "warning");
+        }
+      } catch (error) {
+        console.error(error);
+        showToast("Failed to parse CSV. Please check the format.", "error");
+      } finally {
+        setIsProcessing(false);
+        e.target.value = null; 
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const downloadCsvTemplate = () => {
+    const instructions = [
+      "🛑 INSTRUCTIONS (DO NOT EDIT HEADERS)",
+      "1. Column A MUST be either MCQ, MSQ, or NAT.",
+      "2. For NAT leave Options A-D blank.",
+      "3. For MSQ separate correct answers with commas (e.g. A,C)",
+      "4. Save as .csv and upload.",
+      "", "", "", "", ""
+    ];
+
+    const headers = [
+      "📝 Type (MCQ/MSQ/NAT)",
+      "❓ Question Text",
+      "🅰️ Option A",
+      "🅱️ Option B",
+      "©️ Option C",
+      "🎯 Option D",
+      "✅ Correct Answer (e.g. A or A,C)",
+      "➕ Positive Marks",
+      "➖ Negative Marks",
+      "💡 Explanation (Optional)"
+    ];
+
+    const example1 = ["MCQ", "What is the capital of India?", "Mumbai", "New Delhi", "Chennai", "Kolkata", "B", "2", "0.66", "New Delhi is the capital."];
+    const example2 = ["MSQ", "Which of these are programming languages?", "Python", "HTML", "Java", "CSS", "A,C", "2", "0", "Python and Java are programming languages."];
+    const example3 = ["NAT", "Calculate: 15 + 27", "", "", "", "", "42", "2", "0", "Simple addition."];
+    
+    const emptyRow = ["MCQ", "", "", "", "", "", "", "2", "0.66", ""];
+
+    const csvContent = [
+      instructions.map(e => `"${e}"`).join(","),
+      headers.map(h => `"${h}"`).join(","),
+      example1.map(e => `"${e}"`).join(","),
+      example2.map(e => `"${e}"`).join(","),
+      example3.map(e => `"${e}"`).join(","),
+      emptyRow.map(e => `"${e}"`).join(","),
+      emptyRow.map(e => `"${e}"`).join(","),
+      emptyRow.map(e => `"${e}"`).join(",")
+    ].join("\n");
+    
+    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "Ozone_Bulk_Upload_Template.csv";
+    link.click();
   };
 
   const scrollToQuestion = (index) => {
@@ -329,7 +504,6 @@ export default function CreateMockPage() {
     setCropperState({ show: true, src: objectUrl, file: imageFile, targetQIndex: qIndex, targetType: type, targetOptIndex: optIndex });
   };
 
-  // --- UPGRADED: CLOUDINARY IMAGE UPLOAD LOGIC ---
   const handleCroppedImageUpload = async (croppedFile) => {
     const { targetQIndex, targetType, targetOptIndex } = cropperState;
     setCropperState({ show: false, src: null, file: null, targetQIndex: null, targetType: null, targetOptIndex: null });
@@ -405,7 +579,26 @@ export default function CreateMockPage() {
     if (newType === 'NAT') { updated[qIndex].options = []; updated[qIndex].correctAnswer = ""; } 
     else { 
       updated[qIndex].options = updated[qIndex].options?.length > 0 ? updated[qIndex].options : [{ id: "A", text: "" }, { id: "B", text: "" }, { id: "C", text: "" }, { id: "D", text: "" }]; 
-      updated[qIndex].correctAnswer = "A"; 
+      if (newType === 'MSQ') {
+        updated[qIndex].correctAnswer = Array.isArray(updated[qIndex].correctAnswer) ? updated[qIndex].correctAnswer : [];
+      } else {
+        updated[qIndex].correctAnswer = typeof updated[qIndex].correctAnswer === 'string' ? updated[qIndex].correctAnswer : "A";
+      }
+    }
+    setQuestions(updated);
+  };
+
+  const toggleMsqAnswer = (qIndex, optId) => {
+    const updated = [...questions]; 
+    updated[qIndex] = { ...updated[qIndex] };
+    
+    let currentAns = updated[qIndex].correctAnswer || [];
+    if (!Array.isArray(currentAns)) currentAns = []; 
+    
+    if (currentAns.includes(optId)) {
+      updated[qIndex].correctAnswer = currentAns.filter(id => id !== optId);
+    } else {
+      updated[qIndex].correctAnswer = [...currentAns, optId];
     }
     setQuestions(updated);
   };
@@ -526,7 +719,9 @@ export default function CreateMockPage() {
     }
   };
 
+  // ⚡ DEPLOY / SAVE EXAM LOGIC ⚡
   const saveToDatabase = async () => {
+    setShowDeployConfirm(false);
     if (questions.length === 0) return showToast("No questions to save!", "warning");
     setIsPublishing(true);
     try {
@@ -539,6 +734,11 @@ export default function CreateMockPage() {
         allowCalculator: allowCalculator,
         visibility: visibility,
         availability: availability,
+        blockMobile: blockMobile,
+        blockMultiple: blockMultiple,
+        blockTabSwitch: blockTabSwitch,
+        enableWatermark: enableWatermark,
+        spotlightMode: spotlightMode,
         createdAt: new Date(), 
         status: "published", 
       });
@@ -553,6 +753,11 @@ export default function CreateMockPage() {
       
       setPublishedRoomId(mockRef.id);
     } catch (error) { showToast("Failed to save mock.", "error"); } finally { setIsPublishing(false); }
+  };
+
+  const confirmDeploy = () => {
+    if (questions.length === 0) return showToast("No questions to save!", "warning");
+    setShowDeployConfirm(true); 
   };
 
   if (!isLoaded) return (
@@ -599,6 +804,24 @@ export default function CreateMockPage() {
         </div>
       )}
 
+      {/* --- DEPLOY CONFIRMATION MODAL --- */}
+      {showDeployConfirm && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[99999] flex items-center justify-center p-4">
+           <div className="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-[95%] shadow-2xl border border-slate-200 animate-in zoom-in-95 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-2 bg-indigo-500"></div>
+              <div className="w-16 h-16 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center text-3xl mb-4 mx-auto"><i className="fas fa-paper-plane"></i></div>
+              <h3 className="text-xl font-black text-slate-800 mb-2 text-center">Ready to Publish?</h3>
+              <p className="text-sm font-medium text-slate-500 mb-8 text-center leading-relaxed">
+                Your exam will be secured and pushed to the live server. Don't worry, you can always edit the security settings and visibility later from your dashboard.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center w-full">
+                 <button onClick={() => setShowDeployConfirm(false)} className="px-6 py-3.5 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition w-full sm:w-1/2">Review Settings</button>
+                 <button onClick={saveToDatabase} className="px-6 py-3.5 text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20 rounded-xl transition w-full sm:w-1/2">Yes, Publish</button>
+              </div>
+           </div>
+        </div>
+      )}
+
       {showDraftModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[99999] flex items-center justify-center p-4">
            <div className="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-[95%] shadow-2xl border border-slate-200 animate-in zoom-in-95 relative overflow-hidden">
@@ -634,61 +857,133 @@ export default function CreateMockPage() {
         <ImageCropperModal src={cropperState.src} onCrop={handleCroppedImageUpload} onCancel={() => setCropperState({ show: false, src: null, file: null, targetQIndex: null, targetType: null, targetOptIndex: null })} />
       )}
 
+      {/* --- EXAM SETTINGS MODAL ⚡ UPGRADED SECURITY UI ⚡ --- */}
       {showSettingsModal && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-in fade-in">
-          <div id="tour-exam-settings" className="bg-white rounded-3xl p-6 md:p-8 max-w-md w-[95%] shadow-2xl border border-slate-200">
-            <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-              <h3 className="text-xl font-black text-slate-800"><i className="fas fa-cog text-indigo-500 mr-2"></i> Exam Settings</h3>
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[99999] flex justify-center items-start md:items-center pt-10 pb-10 md:pt-0 p-4 animate-in fade-in overflow-y-auto">
+          <div id="tour-exam-settings" className="bg-white rounded-3xl p-6 md:p-8 max-w-2xl w-[95%] shadow-2xl border border-slate-200 my-auto">
+            <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4 sticky top-0 bg-white z-10">
+              <h3 className="text-xl font-black text-slate-800"><i className="fas fa-cog text-indigo-500 mr-2"></i> Exam Configuration</h3>
               <button onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-rose-500 transition hover:bg-rose-50 w-8 h-8 rounded-full flex items-center justify-center"><i className="fas fa-times text-lg"></i></button>
             </div>
             
-            <div className="space-y-4 md:space-y-5">
-               <div>
-                 <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Exam Category</label>
-                 <select value={examCategory} onChange={(e) => setExamCategory(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500">
-                   <option value="GATE ECE">GATE ECE</option>
-                   <option value="GATE CS">GATE CS</option>
-                   <option value="JEE Mains">JEE Mains</option>
-                   <option value="UPSC">UPSC</option>
-                   <option value="General">General Mock</option>
-                 </select>
-               </div>
-
-               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+               
+               {/* LEFT COLUMN: GENERAL SETTINGS */}
+               <div className="space-y-5">
+                 <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">General Info</h4>
                  <div>
-                   <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Duration (Mins)</label>
-                   <input type="number" value={duration} onChange={(e) => setDuration(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500"/>
-                 </div>
-                 <div>
-                   <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Visibility</label>
-                   <select value={visibility} onChange={(e) => setVisibility(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500">
-                     <option value="private">Private (Code)</option>
-                     <option value="public">Public Feed</option>
+                   <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Exam Category</label>
+                   <select value={examCategory} onChange={(e) => setExamCategory(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500">
+                     <option value="GATE ECE">GATE ECE</option>
+                     <option value="GATE CS">GATE CS</option>
+                     <option value="JEE Mains">JEE Mains</option>
+                     <option value="UPSC">UPSC</option>
+                     <option value="General">General Mock</option>
                    </select>
                  </div>
-               </div>
 
-               <div>
-                 <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Availability</label>
-                 <select value={availability} onChange={(e) => setAvailability(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500">
-                   <option value="always">Always Available</option>
-                   <option value="12h">Available for 12 Hours</option>
-                   <option value="24h">Available for 24 Hours</option>
-                 </select>
-               </div>
+                 <div className="grid grid-cols-2 gap-4">
+                   <div>
+                     <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Duration (Mins)</label>
+                     <input type="number" value={duration} onChange={(e) => setDuration(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500"/>
+                   </div>
+                   <div>
+                     <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Visibility</label>
+                     <select value={visibility} onChange={(e) => setVisibility(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500">
+                       <option value="private">Private (Code)</option>
+                       <option value="public">Public Feed</option>
+                     </select>
+                   </div>
+                 </div>
 
-               <div>
-                 <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Scientific Calculator</label>
-                 <div onClick={() => setAllowCalculator(!allowCalculator)} className={`flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-all ${allowCalculator ? "bg-emerald-50 border-emerald-400" : "bg-slate-50 border-slate-300"}`}>
-                   <span className="text-sm font-bold text-slate-900">{allowCalculator ? "Enabled for Students" : "Disabled"}</span>
-                   <div className={`w-10 h-5 rounded-full relative transition-colors shadow-inner ${allowCalculator ? "bg-emerald-500" : "bg-slate-400"}`}>
-                     <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-[3px] transition-transform shadow-md ${allowCalculator ? "translate-x-[22px]" : "translate-x-[3px]"}`}></div>
+                 <div>
+                   <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Availability</label>
+                   <select value={availability} onChange={(e) => setAvailability(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500">
+                     <option value="always">Always Available</option>
+                     <option value="12h">Available for 12 Hours</option>
+                     <option value="24h">Available for 24 Hours</option>
+                   </select>
+                 </div>
+
+                 <div>
+                   <label className="block text-xs font-black text-slate-600 mb-1.5 uppercase tracking-wide">Scientific Calculator</label>
+                   <div onClick={() => setAllowCalculator(!allowCalculator)} className={`flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-all ${allowCalculator ? "bg-emerald-50 border-emerald-400" : "bg-slate-50 border-slate-300"}`}>
+                     <span className="text-sm font-bold text-slate-900">{allowCalculator ? "Enabled for Students" : "Disabled"}</span>
+                     <div className={`w-10 h-5 rounded-full relative transition-colors shadow-inner ${allowCalculator ? "bg-emerald-500" : "bg-slate-400"}`}>
+                       <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-[3px] transition-transform shadow-md ${allowCalculator ? "translate-x-[22px]" : "translate-x-[3px]"}`}></div>
+                     </div>
                    </div>
                  </div>
                </div>
+
+               {/* RIGHT COLUMN: SECURITY SETTINGS */}
+               <div className="space-y-4">
+                 <div className="flex justify-between items-end border-b border-slate-100 pb-2">
+                   <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest"><i className="fas fa-shield-alt text-rose-400"></i> Security Engine</h4>
+                   <button onClick={toggleAllSecurity} className={`text-[10px] font-black uppercase px-2 py-1 rounded transition ${isAllStrict ? 'bg-rose-100 text-rose-700 hover:bg-rose-200' : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'}`}>
+                     {isAllStrict ? "Disable All" : "Enable All"}
+                   </button>
+                 </div>
+
+                 {/* Security Toggle 1 */}
+                 <div onClick={() => setBlockMobile(!blockMobile)} className={`flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-all ${blockMobile ? "bg-rose-50 border-rose-400" : "bg-slate-50 border-slate-200"}`}>
+                   <div>
+                     <span className="text-xs font-black text-slate-900 block">Block Mobile Phones</span>
+                     <span className="text-[9px] font-bold text-slate-500">AI flags visible smart devices</span>
+                   </div>
+                   <div className={`w-8 h-4 rounded-full relative transition-colors ${blockMobile ? "bg-rose-500" : "bg-slate-300"}`}>
+                     <div className={`w-3 h-3 bg-white rounded-full absolute top-[2px] transition-transform ${blockMobile ? "translate-x-[18px]" : "translate-x-[2px]"}`}></div>
+                   </div>
+                 </div>
+
+                 {/* Security Toggle 2 */}
+                 <div onClick={() => setBlockMultiple(!blockMultiple)} className={`flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-all ${blockMultiple ? "bg-rose-50 border-rose-400" : "bg-slate-50 border-slate-200"}`}>
+                   <div>
+                     <span className="text-xs font-black text-slate-900 block">Block Multiple Persons</span>
+                     <span className="text-[9px] font-bold text-slate-500">AI flags 2+ faces in camera</span>
+                   </div>
+                   <div className={`w-8 h-4 rounded-full relative transition-colors ${blockMultiple ? "bg-rose-500" : "bg-slate-300"}`}>
+                     <div className={`w-3 h-3 bg-white rounded-full absolute top-[2px] transition-transform ${blockMultiple ? "translate-x-[18px]" : "translate-x-[2px]"}`}></div>
+                   </div>
+                 </div>
+
+                 {/* Security Toggle 3 */}
+                 <div onClick={() => setBlockTabSwitch(!blockTabSwitch)} className={`flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-all ${blockTabSwitch ? "bg-rose-50 border-rose-400" : "bg-slate-50 border-slate-200"}`}>
+                   <div>
+                     <span className="text-xs font-black text-slate-900 block">Block Tab Switching</span>
+                     <span className="text-[9px] font-bold text-slate-500">Blurs screen if focus is lost</span>
+                   </div>
+                   <div className={`w-8 h-4 rounded-full relative transition-colors ${blockTabSwitch ? "bg-rose-500" : "bg-slate-300"}`}>
+                     <div className={`w-3 h-3 bg-white rounded-full absolute top-[2px] transition-transform ${blockTabSwitch ? "translate-x-[18px]" : "translate-x-[2px]"}`}></div>
+                   </div>
+                 </div>
+
+                 {/* Security Toggle 4 */}
+                 <div onClick={() => setEnableWatermark(!enableWatermark)} className={`flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-all ${enableWatermark ? "bg-rose-50 border-rose-400" : "bg-slate-50 border-slate-200"}`}>
+                   <div>
+                     <span className="text-xs font-black text-slate-900 block">Forensic Watermarks</span>
+                     <span className="text-[9px] font-bold text-slate-500">Embeds student details on screen</span>
+                   </div>
+                   <div className={`w-8 h-4 rounded-full relative transition-colors ${enableWatermark ? "bg-rose-500" : "bg-slate-300"}`}>
+                     <div className={`w-3 h-3 bg-white rounded-full absolute top-[2px] transition-transform ${enableWatermark ? "translate-x-[18px]" : "translate-x-[2px]"}`}></div>
+                   </div>
+                 </div>
+
+                 {/* Security Toggle 5 */}
+                 <div onClick={() => setSpotlightMode(!spotlightMode)} className={`flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-all ${spotlightMode ? "bg-rose-50 border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.2)]" : "bg-slate-50 border-slate-200"}`}>
+                   <div>
+                     <span className="text-xs font-black text-slate-900 block text-rose-600">Anti-Camera Spotlight</span>
+                     <span className="text-[9px] font-bold text-slate-500">Defeats Google Lens & ChatGPT</span>
+                   </div>
+                   <div className={`w-8 h-4 rounded-full relative transition-colors ${spotlightMode ? "bg-rose-500" : "bg-slate-300"}`}>
+                     <div className={`w-3 h-3 bg-white rounded-full absolute top-[2px] transition-transform ${spotlightMode ? "translate-x-[18px]" : "translate-x-[2px]"}`}></div>
+                   </div>
+                 </div>
+               </div>
+
             </div>
             
-            <button onClick={() => setShowSettingsModal(false)} className="w-full mt-8 bg-indigo-600 text-white py-3.5 rounded-xl font-black hover:bg-indigo-700 shadow-md shadow-indigo-600/20 transition hover:-translate-y-0.5">
+            <button onClick={() => setShowSettingsModal(false)} className="w-full mt-8 bg-indigo-600 text-white py-3.5 rounded-xl font-black hover:bg-indigo-700 shadow-md shadow-indigo-600/20 transition hover:-translate-y-0.5 sticky bottom-0">
               Save Configuration
             </button>
           </div>
@@ -722,9 +1017,9 @@ export default function CreateMockPage() {
               <div className="w-24 h-24 bg-gradient-to-br from-emerald-400 to-emerald-600 text-white rounded-full flex items-center justify-center text-5xl mx-auto mb-6 shadow-lg shadow-emerald-500/30 border-4 border-white"><i className="fas fa-check"></i></div>
               <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3 tracking-tight">Exam is Live!</h2>
               <p className="text-slate-500 font-medium mb-6 text-sm">Share this Room ID with your students:</p>
-              <div className="bg-slate-50 p-4 rounded-2xl mb-8 border-2 border-slate-200 shadow-inner flex items-center justify-center gap-4 group cursor-copy" onClick={handleCopyCode} title="Click to copy">
+              <div className="bg-slate-50 p-4 rounded-2xl mb-8 border-2 border-slate-200 shadow-inner flex items-center justify-center gap-4 group cursor-copy" onClick={() => { navigator.clipboard.writeText(publishedRoomId); showToast("Room ID Copied!", "success"); }} title="Click to copy">
                 <span className="text-3xl md:text-4xl font-mono font-black text-indigo-700 tracking-wider">{publishedRoomId}</span>
-                <i className={`fas ${copied ? 'fa-check text-emerald-500' : 'fa-copy text-slate-300 group-hover:text-indigo-500'} text-xl transition-colors`}></i>
+                <i className="fas fa-copy text-slate-300 group-hover:text-indigo-500 text-xl transition-colors"></i>
               </div>
               <div className="flex flex-col gap-3 md:gap-4">
                 <button onClick={() => router.push(`/educator/live-rooms/${publishedRoomId}`)} className="w-full bg-gradient-to-r from-indigo-600 to-indigo-700 text-white py-3.5 rounded-xl font-black hover:from-indigo-700 shadow-md transition hover:-translate-y-0.5 text-sm md:text-base">View Live Room Dashboard</button>
@@ -789,7 +1084,8 @@ export default function CreateMockPage() {
             <button onClick={() => setShowSettingsModal(true)} className="flex-1 md:flex-none justify-center bg-slate-100 text-slate-600 px-3 py-2 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-sm hover:bg-slate-200 transition flex items-center gap-2 border border-slate-200">
               <i className="fas fa-cog"></i> <span>Settings</span>
             </button>
-            <button id="tour-publish" onClick={saveToDatabase} disabled={questions.length === 0 || uploadingCount > 0 || isPublishing} className="flex-1 md:flex-none justify-center bg-emerald-600 text-white px-4 py-2 md:px-6 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-md hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+            {/* ⚡ UPDATED: Opens the Deploy Confirmation Modal instead of saving instantly */}
+            <button id="tour-publish" onClick={confirmDeploy} disabled={questions.length === 0 || uploadingCount > 0 || isPublishing} className="flex-1 md:flex-none justify-center bg-emerald-600 text-white px-4 py-2 md:px-6 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-md hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
               {isPublishing ? <><i className="fas fa-spinner fa-spin"></i> <span>Deploying...</span></> : <><i className="fas fa-paper-plane"></i> Publish</>}
             </button>
           </div>
@@ -806,13 +1102,18 @@ export default function CreateMockPage() {
 
           <div className={`flex-1 flex flex-col bg-slate-50 transition-all duration-500 overflow-hidden ${pdfUrl ? 'h-1/2 lg:h-full lg:w-1/2' : 'h-full w-full'}`}>
             
+            {/* ⚡ NEW: BULK CSV UPLOAD BAR ⚡ */}
             <div id="tour-pdf-extract" className="bg-white p-3 md:p-4 border-b border-slate-200 shrink-0 shadow-sm flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between z-10">
-              <div className="flex items-center gap-2 w-full xl:w-auto">
-                <label className="flex-1 xl:flex-none justify-center bg-slate-100 border border-slate-300 text-slate-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-slate-200 transition flex items-center shadow-sm">
+              <div className="flex items-center gap-2 w-full xl:w-auto overflow-x-auto pb-1 xl:pb-0">
+                <label className="flex-1 xl:flex-none justify-center bg-emerald-50 border border-emerald-300 text-emerald-700 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-emerald-100 transition flex items-center shadow-sm whitespace-nowrap">
+                  <i className="fas fa-file-csv mr-2 text-emerald-600"></i> <span>Bulk CSV</span>
+                  <input type="file" accept=".csv" className="hidden" onChange={handleCsvUpload} />
+                </label>
+                <label className="flex-1 xl:flex-none justify-center bg-slate-100 border border-slate-300 text-slate-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-slate-200 transition flex items-center shadow-sm whitespace-nowrap">
                   <i className="fas fa-upload mr-2 text-rose-500"></i> <span>Upload PDF</span>
                   <input type="file" accept="application/pdf" className="hidden" onChange={handleFileChange} />
                 </label>
-                <label className="flex-1 xl:flex-none justify-center bg-indigo-50 border border-indigo-200 text-indigo-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-100 transition flex items-center shadow-sm">
+                <label className="flex-1 xl:flex-none justify-center bg-indigo-50 border border-indigo-200 text-indigo-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-100 transition flex items-center shadow-sm whitespace-nowrap">
                   <i className="fas fa-camera mr-2 text-indigo-600"></i> <span>Scan Phone</span>
                   <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => {
                     const imgFile = e.target.files[0];
@@ -850,12 +1151,17 @@ export default function CreateMockPage() {
                   <div className="mt-10 md:mt-20 flex flex-col items-center justify-center animate-in fade-in zoom-in duration-500 px-4">
                      <div className="w-24 h-24 bg-indigo-50 text-indigo-400 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-inner border border-indigo-100/50 transform -rotate-3"><i className="fas fa-file-signature"></i></div>
                      <h2 className="text-2xl md:text-3xl font-black text-slate-800 mb-3 text-center tracking-tight">Your Exam is Empty</h2>
-                     <p className="text-sm font-medium text-slate-500 max-w-md text-center mb-8 leading-relaxed">Upload a document to the top bar to extract questions using Gemini AI, or start building your exam manually.</p>
+                     <p className="text-sm font-medium text-slate-500 max-w-md text-center mb-8 leading-relaxed">Upload a document to the top bar to extract questions using AI, upload a CSV file, or start building manually.</p>
                      
-                     <button id="tour-manual-build" onClick={handleAddCustomQuestion} disabled={isProcessing} className="bg-emerald-500 text-white px-8 py-4 rounded-xl font-black hover:bg-emerald-600 hover:-translate-y-1 transition-all text-sm md:text-base shadow-lg shadow-emerald-500/30 flex items-center gap-3 group relative overflow-hidden w-full sm:w-auto justify-center">
-                       <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500"></div>
-                       <i className="fas fa-plus text-lg"></i> Build from Scratch
-                     </button>
+                     <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
+                       <button id="tour-manual-build" onClick={handleAddCustomQuestion} disabled={isProcessing} className="bg-emerald-500 text-white px-8 py-3.5 rounded-xl font-black hover:bg-emerald-600 hover:-translate-y-1 transition-all text-sm md:text-base shadow-lg shadow-emerald-500/30 flex items-center gap-3 group relative overflow-hidden w-full sm:w-auto justify-center">
+                         <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500"></div>
+                         <i className="fas fa-plus text-lg"></i> Build from Scratch
+                       </button>
+                       <button onClick={downloadCsvTemplate} className="bg-white text-slate-700 border border-slate-300 px-8 py-3.5 rounded-xl font-bold hover:bg-slate-50 hover:-translate-y-1 transition-all text-sm shadow-sm flex items-center gap-3 w-full sm:w-auto justify-center">
+                         <i className="fas fa-download text-emerald-500"></i> Download CSV Template
+                       </button>
+                     </div>
                   </div>
                 ) : (
                   questions.map((q, qIndex) => {
@@ -943,14 +1249,12 @@ export default function CreateMockPage() {
                                       <div key={optIndex} className={`flex items-start gap-3 p-3 rounded-xl border transition-colors ${isCorrect ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-300' : 'border-slate-300 bg-slate-50 hover:border-slate-400'}`}>
                                         <input type={q.type === "MSQ" ? "checkbox" : "radio"} checked={isCorrect} onChange={() => q.type === "MSQ" ? toggleMsqAnswer(qIndex, opt.id) : updateQuestionField(qIndex, 'correctAnswer', opt.id)} className="mt-2 w-4 h-4 accent-emerald-600 cursor-pointer shrink-0" />
                                         <div className="flex-1 min-w-0">
-                                          
                                           <div className="relative mb-2">
                                             <input type="text" value={opt.text} onChange={(e) => updateOptionText(qIndex, optIndex, e.target.value)} onPaste={(e) => handlePaste(e, qIndex, 'option', optIndex)} placeholder={`Option ${opt.id}...`} className={`w-full bg-white border border-slate-300 rounded-lg p-2.5 pr-10 text-xs font-bold text-slate-900 focus:border-indigo-500 outline-none shadow-sm ${q.isGeneratingOptions ? 'opacity-50 animate-pulse' : ''}`} disabled={q.isGeneratingOptions} />
                                             <button onClick={() => toggleDictation(qIndex, 'option', optIndex)} className={`absolute top-1.5 right-1.5 p-1.5 rounded transition border ${listeningField === `q-${qIndex}-opt-${optIndex}` ? 'bg-rose-100 text-rose-600 border-rose-200 animate-pulse' : 'bg-slate-100 text-slate-400 border-transparent hover:text-indigo-600 hover:bg-white hover:border-slate-200'}`}>
                                               <i className="fas fa-microphone"></i>
                                             </button>
                                           </div>
-
                                           <div className="flex flex-col sm:flex-row sm:items-center justify-between mt-1 px-1 gap-2">
                                              <div className="text-[10px] font-black text-slate-700 truncate overflow-x-auto max-w-[150px]"><Latex>{opt.text}</Latex></div>
                                              <label className="shrink-0 text-[10px] font-black text-indigo-700 cursor-pointer hover:bg-indigo-100 transition bg-indigo-50 px-2 py-1 rounded border border-indigo-200 shadow-sm self-start sm:self-auto">
@@ -958,7 +1262,6 @@ export default function CreateMockPage() {
                                                <input type="file" accept="image/*" className="hidden" onChange={(e) => initiateImageUpload(e.target.files[0], qIndex, 'option', optIndex)} />
                                              </label>
                                           </div>
-
                                           {opt.imageUrl && (
                                             <div className="relative mt-2 inline-block border border-slate-300 rounded-lg bg-slate-100 p-1 shadow-inner">
                                                <button onClick={() => removeImage(qIndex, 'option', optIndex)} className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] shadow-md hover:scale-110"><i className="fas fa-times"></i></button>
@@ -988,7 +1291,7 @@ export default function CreateMockPage() {
                                   </button>
                                 </div>
                               </div>
-
+                              
                               {q.explanation && (
                                 <div className="mb-3 p-4 bg-white rounded-xl border border-indigo-100 shadow-sm">
                                   <span className="text-[9px] font-black uppercase text-indigo-400 block mb-1">Solution Preview</span>
@@ -1004,7 +1307,6 @@ export default function CreateMockPage() {
                                 placeholder="Type explanation, or click 'AI Solve' above..." 
                                 disabled={q.isGeneratingSolution}
                               />
-                              
                               {q.explanationImage && (
                                 <div className="relative mt-3 inline-block border border-slate-300 rounded-lg bg-slate-100 p-2 shadow-inner">
                                    <button onClick={() => removeImage(qIndex, 'explanation')} className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-[10px] shadow-md hover:scale-110 z-20"><i className="fas fa-times"></i></button>

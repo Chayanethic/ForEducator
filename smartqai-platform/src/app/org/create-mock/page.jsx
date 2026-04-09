@@ -112,7 +112,7 @@ export default function OrgCreateMockPage() {
   const { signOut } = useClerk();
   const router = useRouter();
   
-  // Security Redirect
+  // Security Redirect: If no Org is selected, kick them to the portal
   useEffect(() => {
     if (orgLoaded && !organization) {
       router.push("/org");
@@ -145,9 +145,9 @@ export default function OrgCreateMockPage() {
   const [cropperState, setCropperState] = useState({ show: false, src: null, file: null, targetQIndex: null, targetType: null, targetOptIndex: null });
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [showDraftModal, setShowDraftModal] = useState(false);
-  const [showDeployConfirm, setShowDeployConfirm] = useState(false); // ⚡ NEW: Deploy confirmation modal
+  const [showDeployConfirm, setShowDeployConfirm] = useState(false);
   
-  // --- EXAM SETTINGS ---
+  // Settings
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [examTitle, setExamTitle] = useState("Corporate Entrance Test");
   const [examCategory, setExamCategory] = useState("General");
@@ -156,7 +156,7 @@ export default function OrgCreateMockPage() {
   const [visibility, setVisibility] = useState("private"); 
   const [availability, setAvailability] = useState("always");
   
-  // ⚡ NEW: GRANULAR SECURITY SETTINGS ⚡
+  // Security Settings
   const [blockMobile, setBlockMobile] = useState(true);
   const [blockMultiple, setBlockMultiple] = useState(true);
   const [blockTabSwitch, setBlockTabSwitch] = useState(true);
@@ -198,7 +198,6 @@ export default function OrgCreateMockPage() {
             setExamCategory(parsed.examCategory || "");
             setDuration(parsed.duration || 60);
             
-            // Restore security settings if they exist
             if (parsed.blockMobile !== undefined) setBlockMobile(parsed.blockMobile);
             if (parsed.blockMultiple !== undefined) setBlockMultiple(parsed.blockMultiple);
             if (parsed.blockTabSwitch !== undefined) setBlockTabSwitch(parsed.blockTabSwitch);
@@ -242,6 +241,159 @@ export default function OrgCreateMockPage() {
         setPdfUrl(null); 
       }
     }
+  };
+
+  // ⚡ --- UPGRADED, BULLETPROOF CSV UPLOAD LOGIC --- ⚡
+  const parseCSV = (text) => {
+    const result = [];
+    let row = [];
+    let inQuotes = false;
+    let val = "";
+    for (let i = 0; i < text.length; i++) {
+      let char = text[i];
+      if (inQuotes) {
+        if (char === '"') {
+          if (i < text.length - 1 && text[i + 1] === '"') { val += '"'; i++; } 
+          else { inQuotes = false; }
+        } else { val += char; }
+      } else {
+        if (char === '"') { inQuotes = true; }
+        else if (char === ',') { row.push(val); val = ""; }
+        else if (char === '\n' || char === '\r') {
+          row.push(val); val = "";
+          if (row.length > 1 || row[0] !== "") result.push(row);
+          row = [];
+          if (char === '\r' && i < text.length - 1 && text[i + 1] === '\n') i++; 
+        } else { val += char; }
+      }
+    }
+    if (val || row.length > 0) { row.push(val); result.push(row); }
+    return result;
+  };
+
+  const handleCsvUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsProcessing(true);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const csvData = parseCSV(event.target.result);
+        const parsedQs = [];
+
+        // Safely scan all rows, looking ONLY for valid question types to skip headers/instructions automatically
+        for (let i = 0; i < csvData.length; i++) {
+          const row = csvData[i];
+          
+          if (row.length < 2 || !row[1] || row[1].trim() === "") continue; 
+
+          const qTypeRaw = row[0]?.toUpperCase().trim();
+          
+          // If the first column isn't one of our 3 types, it's an instruction/header row, so skip it!
+          if (!['MCQ', 'MSQ', 'NAT'].includes(qTypeRaw)) continue;
+
+          const qType = qTypeRaw;
+          const qText = row[1] || '';
+          const optA = row[2] || '';
+          const optB = row[3] || '';
+          const optC = row[4] || '';
+          const optD = row[5] || '';
+          let correctAns = row[6]?.trim() || '';
+          const marks = parseFloat(row[7]) || 2;
+          const negMarks = parseFloat(row[8]) || 0.66;
+          const explanation = row[9] || '';
+
+          if (qType === 'MSQ') {
+             correctAns = correctAns.split(',').map(s => s.trim().toUpperCase());
+          }
+
+          parsedQs.push({
+            text: qText,
+            type: qType,
+            hasImage: false,
+            imageUrl: null,
+            options: qType === 'NAT' ? [] : [
+              { id: "A", text: optA, imageUrl: null },
+              { id: "B", text: optB, imageUrl: null },
+              { id: "C", text: optC, imageUrl: null },
+              { id: "D", text: optD, imageUrl: null }
+            ],
+            correctAnswer: correctAns,
+            explanation: explanation,
+            explanationImage: null,
+            marks: marks,
+            negativeMarks: negMarks,
+            isGeneratingOptions: false,
+            isGeneratingSolution: false
+          });
+        }
+
+        if (parsedQs.length > 0) {
+          setQuestions(prev => [...prev, ...parsedQs]);
+          setExpandedQIndex(questions.length); 
+          showToast(`Successfully imported ${parsedQs.length} questions from CSV!`, "success");
+        } else {
+          showToast("No valid questions found. Ensure Column A is MCQ, MSQ, or NAT.", "warning");
+        }
+      } catch (error) {
+        console.error(error);
+        showToast("Failed to parse CSV. Please check the format.", "error");
+      } finally {
+        setIsProcessing(false);
+        e.target.value = null; 
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const downloadCsvTemplate = () => {
+    // ⚡ The Emoji & Instruction Trick: Makes Excel look colorful and prevents parsing errors
+    const instructions = [
+      "🛑 INSTRUCTIONS (DO NOT EDIT HEADERS)",
+      "1. Column A MUST be either MCQ, MSQ, or NAT.",
+      "2. For NAT leave Options A-D blank.",
+      "3. For MSQ separate correct answers with commas (e.g. A,C)",
+      "4. Save as .csv and upload.",
+      "", "", "", "", ""
+    ];
+
+    const headers = [
+      "📝 Type (MCQ/MSQ/NAT)",
+      "❓ Question Text",
+      "🅰️ Option A",
+      "🅱️ Option B",
+      "©️ Option C",
+      "🎯 Option D",
+      "✅ Correct Answer (e.g. A or A,C)",
+      "➕ Positive Marks",
+      "➖ Negative Marks",
+      "💡 Explanation (Optional)"
+    ];
+
+    const example1 = ["MCQ", "What is the capital of India?", "Mumbai", "New Delhi", "Chennai", "Kolkata", "B", "2", "0.66", "New Delhi is the capital."];
+    const example2 = ["MSQ", "Which of these are programming languages?", "Python", "HTML", "Java", "CSS", "A,C", "2", "0", "Python and Java are programming languages."];
+    const example3 = ["NAT", "Calculate: 15 + 27", "", "", "", "", "42", "2", "0", "Simple addition."];
+    
+    const emptyRow = ["MCQ", "", "", "", "", "", "", "2", "0.66", ""];
+
+    const csvContent = [
+      instructions.map(e => `"${e}"`).join(","),
+      headers.map(h => `"${h}"`).join(","),
+      example1.map(e => `"${e}"`).join(","),
+      example2.map(e => `"${e}"`).join(","),
+      example3.map(e => `"${e}"`).join(","),
+      emptyRow.map(e => `"${e}"`).join(","),
+      emptyRow.map(e => `"${e}"`).join(","),
+      emptyRow.map(e => `"${e}"`).join(",")
+    ].join("\n");
+    
+    // ⚡ BOM (\uFEFF) forces Excel to format the CSV columns perfectly without scrambling!
+    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "Ozone_Bulk_Upload_Template.csv";
+    link.click();
   };
 
   const scrollToQuestion = (index) => {
@@ -608,7 +760,6 @@ export default function OrgCreateMockPage() {
         allowCalculator: allowCalculator,
         visibility: visibility,
         availability: availability,
-        // Save the detailed security settings
         blockMobile: blockMobile,
         blockMultiple: blockMultiple,
         blockTabSwitch: blockTabSwitch,
@@ -633,7 +784,7 @@ export default function OrgCreateMockPage() {
 
   const confirmDeploy = () => {
     if (questions.length === 0) return showToast("No questions to save!", "warning");
-    setShowDeployConfirm(true); // Open the pre-deploy confirmation modal
+    setShowDeployConfirm(true); 
   };
 
   const copyIframeCode = () => {
@@ -685,7 +836,7 @@ export default function OrgCreateMockPage() {
         </div>
       )}
 
-      {/* --- DEPLOY CONFIRMATION MODAL ⚡ NEW ⚡ --- */}
+      {/* --- DEPLOY CONFIRMATION MODAL --- */}
       {showDeployConfirm && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[99999] flex items-center justify-center p-4">
            <div className="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-[95%] shadow-2xl border border-slate-200 animate-in zoom-in-95 relative overflow-hidden">
@@ -988,15 +1139,23 @@ export default function OrgCreateMockPage() {
 
           <div className={`flex-1 flex flex-col bg-slate-50 transition-all duration-500 overflow-hidden ${pdfUrl ? 'h-1/2 lg:h-full lg:w-1/2' : 'h-full w-full'}`}>
             
-            {/* AI EXTRACT BAR */}
+            {/* ⚡ AI EXTRACT BAR & BULK UPLOAD ⚡ */}
             <div className="bg-white p-3 md:p-4 border-b border-slate-200 shrink-0 shadow-sm flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between z-10">
-              <div className="flex items-center gap-2 w-full xl:w-auto">
-                <label className="flex-1 xl:flex-none justify-center bg-slate-100 border border-slate-300 text-slate-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-slate-200 transition flex items-center shadow-sm">
-                  <i className="fas fa-upload mr-2 text-rose-500"></i> <span>Upload PDF</span>
+              <div className="flex items-center gap-2 w-full xl:w-auto overflow-x-auto pb-1 xl:pb-0">
+                
+                {/* ⚡ NEW: BULK CSV UPLOAD BUTTON ⚡ */}
+                <label className="flex-1 xl:flex-none justify-center bg-emerald-50 border border-emerald-300 text-emerald-700 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-emerald-100 transition flex items-center shadow-sm whitespace-nowrap">
+                  <i className="fas fa-file-csv mr-2 text-emerald-600"></i> <span>Bulk CSV</span>
+                  <input type="file" accept=".csv" className="hidden" onChange={handleCsvUpload} />
+                </label>
+
+                <label className="flex-1 xl:flex-none justify-center bg-slate-100 border border-slate-300 text-slate-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-slate-200 transition flex items-center shadow-sm whitespace-nowrap">
+                  <i className="fas fa-file-pdf mr-2 text-rose-500"></i> <span>Scan PDF</span>
                   <input type="file" accept="application/pdf" className="hidden" onChange={handleFileChange} />
                 </label>
-                <label className="flex-1 xl:flex-none justify-center bg-indigo-50 border border-indigo-200 text-indigo-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-100 transition flex items-center shadow-sm">
-                  <i className="fas fa-camera mr-2 text-indigo-600"></i> <span>Scan Phone</span>
+                
+                <label className="flex-1 xl:flex-none justify-center bg-indigo-50 border border-indigo-200 text-indigo-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-100 transition flex items-center shadow-sm whitespace-nowrap">
+                  <i className="fas fa-camera mr-2 text-indigo-600"></i> <span>Camera</span>
                   <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => {
                     const imgFile = e.target.files[0];
                     if (imgFile) { setFile(imgFile); setPdfUrl(null); showToast("Photo captured! Use 'Extract Qs' or crop.", "success"); }
@@ -1031,11 +1190,18 @@ export default function OrgCreateMockPage() {
                   <div className="mt-10 md:mt-20 flex flex-col items-center justify-center animate-in fade-in zoom-in duration-500 px-4">
                      <div className="w-24 h-24 bg-indigo-50 text-indigo-400 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-inner border border-indigo-100/50 transform -rotate-3"><i className="fas fa-shield-alt"></i></div>
                      <h2 className="text-2xl md:text-3xl font-black text-slate-800 mb-3 text-center tracking-tight">Enterprise Studio</h2>
-                     <p className="text-sm font-medium text-slate-500 max-w-md text-center mb-8 leading-relaxed">Upload a document to the top bar to extract questions using Gemini AI, or start building your white-label exam manually.</p>
-                     <button onClick={handleAddCustomQuestion} disabled={isProcessing} className="bg-emerald-500 text-white px-8 py-4 rounded-xl font-black hover:bg-emerald-600 hover:-translate-y-1 transition-all text-sm md:text-base shadow-lg shadow-emerald-500/30 flex items-center gap-3 group relative overflow-hidden w-full sm:w-auto justify-center">
-                       <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500"></div>
-                       <i className="fas fa-plus text-lg"></i> Build from Scratch
-                     </button>
+                     <p className="text-sm font-medium text-slate-500 max-w-md text-center mb-8 leading-relaxed">Upload a document to the top bar to extract questions using AI, upload a CSV file, or build manually.</p>
+                     
+                     <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
+                       <button onClick={handleAddCustomQuestion} disabled={isProcessing} className="bg-emerald-500 text-white px-8 py-3.5 rounded-xl font-black hover:bg-emerald-600 hover:-translate-y-1 transition-all text-sm shadow-lg shadow-emerald-500/30 flex items-center gap-3 w-full sm:w-auto justify-center">
+                         <i className="fas fa-plus"></i> Build from Scratch
+                       </button>
+                       
+                       {/* ⚡ NEW: DOWNLOAD CSV TEMPLATE BUTTON ⚡ */}
+                       <button onClick={downloadCsvTemplate} className="bg-white text-slate-700 border border-slate-300 px-8 py-3.5 rounded-xl font-bold hover:bg-slate-50 hover:-translate-y-1 transition-all text-sm shadow-sm flex items-center gap-3 w-full sm:w-auto justify-center">
+                         <i className="fas fa-download text-emerald-500"></i> Download CSV Template
+                       </button>
+                     </div>
                   </div>
                 ) : (
                   questions.map((q, qIndex) => {

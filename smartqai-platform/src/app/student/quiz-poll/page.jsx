@@ -11,7 +11,10 @@ import 'katex/dist/katex.min.css';
 import { doc, getDoc, updateDoc, onSnapshot, increment } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
-// --- MAIN LOGIC COMPONENT ---
+// ⚡ EXPLICITLY TELL NEXT.JS NOT TO STATICALLY BUILD THIS PAGE ⚡
+export const dynamic = "force-dynamic";
+
+// --- 1. THE MAIN LOGIC COMPONENT (Notice there is no "export default" here) ---
 function QuizPollContent() {
   const { user, isLoaded } = useUser();
   const { signOut } = useClerk();
@@ -29,7 +32,7 @@ function QuizPollContent() {
 
   // --- LIVE DATA FROM FIREBASE ---
   const [roomData, setRoomData] = useState(null);
-  const [currentPollId, setCurrentPollId] = useState(null); // Tracks unique questions to prevent reset loops
+  const [currentPollId, setCurrentPollId] = useState(null); 
   const [timeLeft, setTimeLeft] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState("");
   const [hasSubmitted, setHasSubmitted] = useState(false);
@@ -71,14 +74,14 @@ function QuizPollContent() {
   // Leave Room Safely
   const handleLeaveRoom = () => {
     if (confirm("Are you sure you want to leave the live poll?")) {
-      setRoomCode(""); // This instantly kills the Firebase onSnapshot listener
+      setRoomCode(""); 
       setRoomData(null);
       setCurrentPollId(null);
       setView("join");
     }
   };
 
-  // Real-time Firebase Data Listener (Only fetches data, does not force views)
+  // Real-time Firebase Data Listener
   useEffect(() => {
     if (!roomCode) return;
 
@@ -87,7 +90,6 @@ function QuizPollContent() {
       if (snapshot.exists()) {
         setRoomData(snapshot.data());
       } else {
-        // Room was deleted by educator
         alert("The educator has closed this room.");
         setView("join");
         setRoomCode("");
@@ -99,7 +101,7 @@ function QuizPollContent() {
     return () => unsubscribe();
   }, [roomCode]);
 
-  // State Transition Engine (Safely handles view changes)
+  // State Transition Engine 
   useEffect(() => {
     if (!roomData || !user) return;
 
@@ -107,18 +109,15 @@ function QuizPollContent() {
        setView("leaderboard");
     } 
     else if (roomData.status === "active") {
-       // Check if this is a BRAND NEW question using the expiresAt timestamp
        if (roomData.expiresAt !== currentPollId) {
           setCurrentPollId(roomData.expiresAt);
           
-          // Check if they ALREADY answered (e.g., if they refreshed the page)
           const studentName = user.fullName || "Student";
           if (roomData.responses && roomData.responses[studentName] !== undefined) {
              setSelectedAnswer(roomData.responses[studentName]);
              setHasSubmitted(true);
              setView("submitted");
           } else {
-             // Clean slate for new question
              setView("active");
              setHasSubmitted(false);
              setSelectedAnswer("");
@@ -140,7 +139,6 @@ function QuizPollContent() {
         setTimeLeft(remaining);
         
         if (remaining === 0 && view === "active") {
-          // Auto-lock inputs when time ends locally
           setView("submitted");
           clearInterval(interval);
         }
@@ -161,7 +159,6 @@ function QuizPollContent() {
         [`responses.${studentName}`]: selectedAnswer
       };
 
-      // ⚡ Securely award points
       if (isCorrect) {
          updatePayload[`scores.${studentName}`] = increment(1);
          setLastScoreGained(true);
@@ -182,7 +179,6 @@ function QuizPollContent() {
 
   if (!isLoaded) return <div className="flex h-screen items-center justify-center bg-slate-50"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>;
 
-  // Calculate Leaderboard for student view
   const leaderboard = Object.entries(roomData?.scores || {})
     .map(([name, score]) => ({ name, score }))
     .sort((a, b) => b.score - a.score);
@@ -210,7 +206,7 @@ function QuizPollContent() {
                 <i className="fas fa-home w-4"></i> Dashboard
             </button>
             <button className="w-full flex items-center gap-3 bg-indigo-600 text-white p-2.5 rounded-xl text-sm font-bold shadow-md border-l-4 border-teal-400">
-                <i className="fas fa-satellite-dish w-4 text-teal-400"></i> Live Quiz Poll
+                <i className="fas fa-bolt w-4 text-teal-400"></i> Live Quiz Poll
             </button>
         </nav>
         <div className="p-3 border-t border-slate-800 space-y-1.5">
@@ -234,7 +230,6 @@ function QuizPollContent() {
              </div>
           </div>
           
-          {/* ⚡ "LEAVE ROOM" & STATUS BUTTONS ⚡ */}
           {view !== "join" && (
             <div className="flex items-center gap-3">
               {roomData?.scores?.[user?.fullName || "Student"] !== undefined && (
@@ -413,14 +408,8 @@ function QuizPollContent() {
                       </button>
                     )}
                     
-                    {/* View Leaderboard Button for Students */}
                     {(view === "submitted" || timeLeft === 0) && (
-                      <button 
-                        onClick={() => setView("leaderboard")}
-                        className="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 transition flex items-center justify-center gap-2 text-lg shadow-md"
-                      >
-                        View Live Leaderboard <i className="fas fa-chart-bar"></i>
-                      </button>
+                      <p className="text-center text-[10px] font-black text-slate-400 mt-4 uppercase tracking-widest animate-pulse">Waiting for educator to end poll...</p>
                     )}
                   </div>
 
@@ -436,9 +425,6 @@ function QuizPollContent() {
                     <i className="fas fa-trophy text-amber-500 bg-amber-50 w-10 h-10 rounded-lg flex items-center justify-center"></i> 
                     Live Class Leaderboard
                   </h3>
-                  <button onClick={() => setView(timeLeft === 0 || hasSubmitted ? "submitted" : "active")} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-bold transition flex items-center gap-2 border border-slate-200">
-                    <i className="fas fa-arrow-left"></i> Back
-                  </button>
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -543,5 +529,14 @@ function QuizPollContent() {
         </div>
       </main>
     </div>
+  );
+}
+
+// ⚡ 2. THE DEFAULT EXPORT EXPLICITLY WRAPPED IN SUSPENSE ⚡
+export default function StudentQuizPollPage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center bg-slate-50"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>}>
+      <QuizPollContent />
+    </Suspense>
   );
 }

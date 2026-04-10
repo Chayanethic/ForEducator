@@ -119,7 +119,6 @@ export default function IframeStudentPlayer({ params }) {
   const [showCalculator, setShowCalculator] = useState(false);
   const [examPhase, setExamPhase] = useState('loading'); 
   const [isSubmittingEngine, setIsSubmittingEngine] = useState(false);
-  
   const [isBlurred, setIsBlurred] = useState(false);
 
   // Tracking Matrices
@@ -153,9 +152,14 @@ export default function IframeStudentPlayer({ params }) {
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [isReviewSubmitted, setIsReviewSubmitted] = useState(false);
 
-  // ⚡ NEW: SPOTLIGHT TRACKING STATE ⚡
+  // SPOTLIGHT TRACKING STATE
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const questionContainerRef = useRef(null);
+
+  // ⚡ ENTERPRISE DATABASE OPTIMIZATION STATE ⚡
+  const saveTimeoutRef = useRef(null);
+  const latestTimeLeft = useRef(timeLeft);
+  useEffect(() => { latestTimeLeft.current = timeLeft; }, [timeLeft]);
 
   const showToast = (message, type = "success") => {
     setToast({ show: true, message, type });
@@ -181,7 +185,7 @@ export default function IframeStudentPlayer({ params }) {
         const initialStatuses = Array(data.questions.length).fill('not-visited');
         if (data.questions.length > 0) initialStatuses[0] = 'not-answered';
         setStatuses(initialStatuses);
-        
+
         if (data.questions.length > 0) setVisited({ 0: true });
 
         // Pre-fill if logged in
@@ -239,14 +243,12 @@ export default function IframeStudentPlayer({ params }) {
     }
   };
 
-  // Keep Video Stream Attached to Ref
   useEffect(() => {
     if (videoRef.current && mediaStream && videoRef.current.srcObject !== mediaStream) {
       videoRef.current.srcObject = mediaStream;
     }
   }, [mediaStream, hasStarted]);
 
-  // Clean up Camera on unmount
   useEffect(() => {
     return () => {
       if (mediaStream) {
@@ -271,7 +273,54 @@ export default function IframeStudentPlayer({ params }) {
     return () => clearInterval(timer);
   }, [hasStarted, isFinished, timeLeft, warningAlert.show, isSubmittingEngine]);
 
-  // ⚡ BLIND-BLUR EVENT LISTENER ⚡
+  // ⚡ 2-MINUTE HEARTBEAT SYNC (Saves Time & State Safely) ⚡
+  useEffect(() => {
+    if (examPhase !== 'active' || !examData) return;
+    const identifier = user?.id || studentInfo?.email;
+    if (!identifier) return;
+
+    const intervalSave = setInterval(async () => {
+       try {
+          const progressRef = doc(db, "progress", `${identifier}_${mockId}`);
+          await setDoc(progressRef, {
+            timeLeft: latestTimeLeft.current,
+            lastUpdated: new Date()
+          }, { merge: true });
+       } catch (e) {
+          console.error("Heartbeat sync failed", e);
+       }
+    }, 120000); // 120,000 ms = 2 minutes
+
+    return () => clearInterval(intervalSave);
+  }, [examPhase, user, examData, mockId, studentInfo]);
+
+  // ⚡ DEBOUNCED CLOUD SYNC ENGINE ⚡
+  const saveProgressToCloud = (newAnswers, newVisited, newMarked, newStatuses) => {
+    const identifier = user?.id || studentInfo?.email;
+    if (!identifier || !examData) return;
+    
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        const progressRef = doc(db, "progress", `${identifier}_${mockId}`);
+        await setDoc(progressRef, {
+          studentId: identifier,
+          mockId: mockId,
+          answers: newAnswers,
+          visited: newVisited,
+          markedForReview: newMarked,
+          statuses: newStatuses,
+          timeLeft: latestTimeLeft.current,
+          lastUpdated: new Date(),
+          isSubmitted: false
+        }, { merge: true });
+      } catch (error) {
+        console.error("Debounced sync failed:", error);
+      }
+    }, 2500); // 2.5 second delay
+  };
+
   useEffect(() => {
     if (examPhase !== 'active') return;
 
@@ -287,7 +336,6 @@ export default function IframeStudentPlayer({ params }) {
     };
   }, [examPhase]);
 
-  // ⚡ SPOTLIGHT MOUSE TRACKER ⚡
   useEffect(() => {
     if (!examData?.spotlightMode || examPhase !== 'active') return;
     
@@ -304,10 +352,6 @@ export default function IframeStudentPlayer({ params }) {
     window.addEventListener('mousemove', handleMouseMove);
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, [examData?.spotlightMode, examPhase]);
-
-  // ==========================================
-  // AGGRESSIVE ANTI-CHEAT ENGINE
-  // ==========================================
 
   const issueWarning = (reason) => {
     setWarnings(prev => {
@@ -441,11 +485,7 @@ export default function IframeStudentPlayer({ params }) {
     };
   }, [isStrictProctoringActive, isFinished, warningAlert.show, aiModel, isCameraActive]);
 
-  // ==========================================
-  // EXAM CONTROLS & FORM VALIDATION
-  // ==========================================
-
-  const startSecureExam = (e) => {
+  const startSecureExam = async (e) => {
     e.preventDefault();
     setFormError(""); 
 
@@ -476,6 +516,24 @@ export default function IframeStudentPlayer({ params }) {
       return;
     }
 
+    // ⚡ FETCH EXISTING AUTO-SAVE DATA BEFORE STARTING ⚡
+    try {
+      const identifier = user?.id || studentInfo.email;
+      const progressRef = doc(db, "progress", `${identifier}_${mockId}`);
+      const progressSnap = await getDoc(progressRef);
+      if (progressSnap.exists() && !progressSnap.data().isSubmitted) {
+        const data = progressSnap.data();
+        setAnswers(data.answers || {});
+        setVisited(data.visited || { 0: true });
+        setMarkedForReview(data.markedForReview || {});
+        if (data.statuses) setStatuses(data.statuses);
+        if (data.timeLeft) setTimeLeft(data.timeLeft);
+        showToast("Previous exam session restored.", "success");
+      }
+    } catch(err) {
+      console.log("Could not load previous progress", err);
+    }
+
     const elem = playerRef.current || document.documentElement;
     try {
       if (elem.requestFullscreen) {
@@ -492,35 +550,135 @@ export default function IframeStudentPlayer({ params }) {
     setExamPhase('active');
   };
 
+  const checkHasAnswer = (ansObj, index, qType) => {
+    const ans = ansObj[index];
+    if (ans === undefined || ans === null) return false;
+    if (qType === 'MSQ' && Array.isArray(ans)) return ans.length > 0;
+    return String(ans).trim() !== '';
+  };
+
   const handleAnswerSelect = (optId) => {
     const q = questions[currentQIndex];
+    let newAns;
     if (q.type === 'MSQ') {
       let currentAns = answers[currentQIndex] || [];
       if (!Array.isArray(currentAns)) currentAns = [];
-      const newAns = currentAns.includes(optId) ? currentAns.filter(id => id !== optId) : [...currentAns, optId];
-      setAnswers({ ...answers, [currentQIndex]: newAns });
+      newAns = currentAns.includes(optId) ? currentAns.filter(id => id !== optId) : [...currentAns, optId];
     } else {
-      setAnswers({ ...answers, [currentQIndex]: optId });
+      newAns = optId;
     }
+    
+    const updatedAnswers = { ...answers, [currentQIndex]: newAns };
+    setAnswers(updatedAnswers);
+
+    setStatuses(prev => {
+      const updated = [...prev];
+      const hasAns = checkHasAnswer(updatedAnswers, currentQIndex, q.type);
+      if (updated[currentQIndex] === 'marked' || updated[currentQIndex] === 'answered-marked') {
+        updated[currentQIndex] = hasAns ? 'answered-marked' : 'marked';
+      } else {
+        updated[currentQIndex] = hasAns ? 'answered' : 'not-answered';
+      }
+      saveProgressToCloud(updatedAnswers, visited, markedForReview, updated);
+      return updated;
+    });
   };
 
   const handleNatInput = (val) => {
-    setAnswers({ ...answers, [currentQIndex]: val });
+    const updatedAnswers = { ...answers, [currentQIndex]: val };
+    setAnswers(updatedAnswers);
+
+    setStatuses(prev => {
+      const updated = [...prev];
+      const hasAns = checkHasAnswer(updatedAnswers, currentQIndex, 'NAT');
+      if (updated[currentQIndex] === 'marked' || updated[currentQIndex] === 'answered-marked') {
+        updated[currentQIndex] = hasAns ? 'answered-marked' : 'marked';
+      } else {
+        updated[currentQIndex] = hasAns ? 'answered' : 'not-answered';
+      }
+      saveProgressToCloud(updatedAnswers, visited, markedForReview, updated);
+      return updated;
+    });
   };
 
   const clearResponse = () => {
-    const newAnswers = { ...answers };
-    delete newAnswers[currentQIndex];
-    setAnswers(newAnswers);
+    const updatedAnswers = { ...answers };
+    delete updatedAnswers[currentQIndex];
+    setAnswers(updatedAnswers);
+
+    setStatuses(prev => {
+      const updated = [...prev];
+      updated[currentQIndex] = 'not-answered';
+      saveProgressToCloud(updatedAnswers, visited, markedForReview, updated);
+      return updated;
+    });
   };
 
   const toggleReview = () => {
-    setMarkedForReview(prev => ({ ...prev, [currentQIndex]: !prev[currentQIndex] }));
+    const updatedMarked = { ...markedForReview, [currentQIndex]: !markedForReview[currentQIndex] };
+    setMarkedForReview(updatedMarked);
+
+    setStatuses(prev => {
+      const updated = [...prev];
+      const qType = questions[currentQIndex]?.type || 'MCQ';
+      const hasAns = checkHasAnswer(answers, currentQIndex, qType);
+      
+      if (updatedMarked[currentQIndex]) {
+        updated[currentQIndex] = hasAns ? 'answered-marked' : 'marked';
+      } else {
+        updated[currentQIndex] = hasAns ? 'answered' : 'not-answered';
+      }
+      saveProgressToCloud(answers, visited, updatedMarked, updated);
+      return updated;
+    });
   };
 
   const navigateTo = (index) => {
-    setVisited(prev => ({ ...prev, [index]: true }));
+    const updatedVisited = { ...visited, [index]: true };
+    setVisited(updatedVisited);
     setCurrentQIndex(index);
+
+    setStatuses(prev => {
+      const updated = [...prev];
+      if (updated[index] === 'not-visited') {
+        updated[index] = 'not-answered';
+      }
+      saveProgressToCloud(answers, updatedVisited, markedForReview, updated);
+      return updated;
+    });
+  };
+
+  const handleSectionTabClick = (sec) => {
+    if (sec === activeSection) return;
+    const firstQuestionIndex = questions.findIndex(q => (q.section || "General") === sec);
+    if (firstQuestionIndex !== -1) {
+      setActiveSection(sec);
+      navigateTo(firstQuestionIndex);
+    }
+  };
+
+  const saveAndNext = () => {
+    const currentSectionQs = questions.map((q, i) => ({...q, globalIdx: i})).filter(q => (q.section || "General") === activeSection);
+    const isLastInSection = currentSectionQs[currentSectionQs.length - 1].globalIdx === currentQIndex;
+
+    if (isLastInSection) {
+      const sectionIdx = uniqueSections.indexOf(activeSection);
+      if (sectionIdx < uniqueSections.length - 1) {
+        const nextSecName = uniqueSections[sectionIdx + 1];
+        const firstInNext = questions.findIndex(q => (q.section || "General") === nextSecName);
+        setActiveSection(nextSecName);
+        navigateTo(firstInNext);
+      } else {
+         // Stay on last question
+      }
+    } else {
+      if (currentQIndex < questions.length - 1) navigateTo(currentQIndex + 1);
+    }
+  };
+
+  const markAndNext = () => {
+    toggleReview();
+    saveAndNext();
   };
 
   const submitExam = async (isForced = false) => {
@@ -531,6 +689,10 @@ export default function IframeStudentPlayer({ params }) {
     
     if (mediaStream) {
       mediaStream.getTracks().forEach(track => track.stop());
+    }
+
+    if (saveTimeoutRef.current) {
+       clearTimeout(saveTimeoutRef.current);
     }
 
     if (document.fullscreenElement || document.webkitFullscreenElement) {
@@ -572,6 +734,7 @@ export default function IframeStudentPlayer({ params }) {
     });
 
     const finalScoreFixed = score.toFixed(2);
+    const identifier = user?.id || studentInfo.email;
 
     try {
       await addDoc(collection(db, "mock_exams", mockId, "submissions"), {
@@ -587,6 +750,12 @@ export default function IframeStudentPlayer({ params }) {
         submittedAt: new Date(),
         answers
       });
+      
+      // Update progress to show submitted
+      if (identifier) {
+        const progressRef = doc(db, "progress", `${identifier}_${mockId}`);
+        await setDoc(progressRef, { isSubmitted: true, answers, statuses, visited, markedForReview }, { merge: true });
+      }
 
       await fetch('/api/send-score', {
         method: 'POST',
@@ -608,7 +777,6 @@ export default function IframeStudentPlayer({ params }) {
     }
   };
 
-  // HANDLE STUDENT REVIEW SUBMISSION
   const handleReviewSubmit = async () => {
     if (rating === 0) return; 
     setIsSubmittingReview(true);
@@ -644,9 +812,9 @@ export default function IframeStudentPlayer({ params }) {
   questions.forEach((q, i) => {
     const isAnswered = q.type === 'MSQ' ? (Array.isArray(answers[i]) && answers[i].length > 0) : (answers[i] !== undefined && answers[i] !== "");
     const isMarked = markedForReview[i];
-    const isVisited = visited[i];
+    const isVis = visited[i];
 
-    if (!isVisited) notVisitedCount++;
+    if (!isVis) notVisitedCount++;
     else if (isMarked) markedCount++; 
     else if (isAnswered) answeredCount++;
     else notAnsweredCount++;
@@ -1007,17 +1175,29 @@ export default function IframeStudentPlayer({ params }) {
                 </div>
               </div>
 
-              {/* ⚡ THE ANTI-CAMERA SPOTLIGHT RENDERER ⚡ */}
-              <div 
-                ref={questionContainerRef}
-                className="mb-8 relative p-6 rounded-2xl overflow-hidden bg-white border border-slate-200"
-                style={examData?.spotlightMode ? { 
-                  '--x': `${mousePos.x}px`, 
-                  '--y': `${mousePos.y}px` 
-                } : {}}
-              >
+              {/* --- UPGRADED QUESTION AND DIAGRAM RENDERER --- */}
+              <div className="mb-8 relative p-6 rounded-2xl overflow-hidden bg-white border border-slate-200" style={examData?.spotlightMode ? { '--x': `${mousePos.x}px`, '--y': `${mousePos.y}px` } : {}}>
                 
-                {/* Spotlight Obfuscation Layer */}
+                {/* ⚡ THE ANTI-OCR MOIRÉ SCRAMBLER ⚡ */}
+                {examData?.aiPoisoning && (
+                  <>
+                    <div 
+                      className="absolute inset-0 pointer-events-none z-20 mix-blend-difference opacity-40"
+                      style={{
+                        backgroundImage: `repeating-linear-gradient(0deg, transparent, transparent 1px, #000 1px, #000 2px), repeating-linear-gradient(90deg, transparent, transparent 1px, #000 1px, #000 2px)`,
+                        backgroundSize: '3px 3px'
+                      }}
+                    ></div>
+                    <div className="absolute inset-0 pointer-events-none z-10 bg-gradient-to-br from-indigo-500/5 via-transparent to-emerald-500/5 mix-blend-overlay"></div>
+                    <div className="absolute inset-0 pointer-events-none z-30 opacity-[0.08] overflow-hidden break-all font-mono text-[8px] leading-tight text-slate-900 select-none flex flex-wrap" aria-hidden="true">
+                      {Array.from({ length: 200 }).map((_, i) => (
+                        <span key={i}>{(Math.random() + 1).toString(36).substring(2)} </span>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {/* Spotlight Layer */}
                 {examData?.spotlightMode && hasStarted && (
                   <div 
                     className="absolute inset-0 z-50 pointer-events-none backdrop-blur-xl bg-slate-900/95"
@@ -1032,7 +1212,7 @@ export default function IframeStudentPlayer({ params }) {
                   </div>
                 )}
                 
-                <div className="font-bold text-slate-900 leading-relaxed text-lg whitespace-pre-wrap overflow-x-auto relative z-40">
+                <div className={`font-bold text-slate-900 leading-relaxed text-lg whitespace-pre-wrap overflow-x-auto relative z-40 ${examData?.aiPoisoning ? 'drop-shadow-sm' : ''}`}>
                   <Latex>{currentQ.text}</Latex>
                 </div>
                 

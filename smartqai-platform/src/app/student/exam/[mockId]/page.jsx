@@ -137,7 +137,7 @@ export default function ExamInterface() {
   const [violationCount, setViolationCount] = useState(0);
   const [isStrictProctoringActive, setIsStrictProctoringActive] = useState(false); 
 
-  // ⚡ NEW: VISUAL TRAP STATE ⚡
+  // --- VISUAL TRAP STATE ---
   const [isBlurred, setIsBlurred] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const questionContainerRef = useRef(null);
@@ -145,6 +145,11 @@ export default function ExamInterface() {
   // --- AI PROCTORING STATE ---
   const [aiModel, setAiModel] = useState(null);
   const [isAiLoading, setIsAiLoading] = useState(true);
+
+  // ⚡ ENTERPRISE DATABASE OPTIMIZATION STATE ⚡
+  const saveTimeoutRef = useRef(null);
+  const latestTimeLeft = useRef(timeLeft);
+  useEffect(() => { latestTimeLeft.current = timeLeft; }, [timeLeft]);
 
   const showToast = (message, type = "success") => {
     setToast({ show: true, message, type });
@@ -354,7 +359,7 @@ export default function ExamInterface() {
     const fetchExamAndProgress = async () => {
       if (!mockId) return;
       try {
-        const mockRef = doc(db, "mocks", mockId); // Changed to 'mocks' to match educator output
+        const mockRef = doc(db, "mocks", mockId); 
         let mockSnap = await getDoc(mockRef);
         
         // Fallback for older exams saved in 'mock_exams'
@@ -440,7 +445,50 @@ export default function ExamInterface() {
     return () => clearInterval(timer);
   }, [examPhase, questions.length, isSubmittingEngine]);
 
-  // ⚡ UPDATED AI PROCTORING LOOP (Respects Educator Toggles) ⚡
+  // ⚡ 2-MINUTE HEARTBEAT SYNC (Captures Time Left safely) ⚡
+  useEffect(() => {
+    if (examPhase !== 'active' || !user || !mockDetails) return;
+    
+    const intervalSave = setInterval(async () => {
+       try {
+          const progressRef = doc(db, "progress", `${user.id}_${mockId}`);
+          await setDoc(progressRef, {
+            timeLeft: latestTimeLeft.current,
+            lastUpdated: new Date()
+          }, { merge: true });
+       } catch (e) {
+          console.error("Heartbeat sync failed", e);
+       }
+    }, 120000); // 120,000 ms = 2 minutes
+
+    return () => clearInterval(intervalSave);
+  }, [examPhase, user, mockDetails, mockId]);
+
+  // ⚡ DEBOUNCED CLOUD SYNC ENGINE ⚡
+  // Automatically waits 2.5 seconds after a student stops clicking before writing to Firebase
+  const saveProgressToCloud = (newAnswers, newStatuses) => {
+    if (!user || !mockDetails) return;
+    
+    // Clear previous pending save if user clicks again quickly
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Schedule the new save
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        const progressRef = doc(db, "progress", `${user.id}_${mockId}`);
+        await setDoc(progressRef, {
+          studentId: user.id, mockId: mockId, mockTitle: mockDetails.title,
+          answers: newAnswers, statuses: newStatuses, timeLeft: latestTimeLeft.current,
+          lastUpdated: new Date(), isSubmitted: false
+        }, { merge: true });
+      } catch (error) {
+        console.error("Debounced sync failed:", error);
+      }
+    }, 2500); // 2.5 second delay
+  };
+
   useEffect(() => {
     if (!isStrictProctoringActive || modal.show || !aiModel || !isCameraActive) return;
 
@@ -511,17 +559,6 @@ export default function ExamInterface() {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const saveProgressToCloud = async (newAnswers, newStatuses) => {
-    if (user && mockDetails) {
-      const progressRef = doc(db, "progress", `${user.id}_${mockId}`);
-      await setDoc(progressRef, {
-        studentId: user.id, mockId: mockId, mockTitle: mockDetails.title,
-        answers: newAnswers, statuses: newStatuses, timeLeft: timeLeft,
-        lastUpdated: new Date(), isSubmitted: false
-      }, { merge: true });
-    }
-  };
-
   const handleStartExam = () => {
     if (!hasAcceptedRules || !isCameraActive || isAiLoading) return;
     enterFullScreen();
@@ -549,6 +586,7 @@ export default function ExamInterface() {
          updated[targetIndex] = 'not-answered';
       }
 
+      // Delegate to Debounced Engine
       saveProgressToCloud(answers, updated);
       return updated;
     });
@@ -594,6 +632,8 @@ export default function ExamInterface() {
       } else {
         updated[currentIndex] = hasAns ? 'answered' : 'not-answered';
       }
+      
+      // Delegate to Debounced Engine
       saveProgressToCloud(newAnswers, updated);
       return updated;
     });
@@ -607,6 +647,8 @@ export default function ExamInterface() {
     setStatuses(prev => {
       const updated = [...prev];
       updated[currentIndex] = 'not-answered';
+      
+      // Delegate to Debounced Engine
       saveProgressToCloud(newAnswers, updated);
       return updated;
     });
@@ -698,6 +740,11 @@ export default function ExamInterface() {
     if (mediaStream) {
        mediaStream.getTracks().forEach(track => track.stop());
     }
+
+    // ⚡ CLEAR ANY PENDING SAVES ⚡
+    if (saveTimeoutRef.current) {
+       clearTimeout(saveTimeoutRef.current);
+    }
     
     try {
       let score = 0; let correct = 0; let incorrect = 0;
@@ -741,7 +788,8 @@ export default function ExamInterface() {
 
       if (user) {
         const progressRef = doc(db, "progress", `${user.id}_${mockId}`);
-        await setDoc(progressRef, { isSubmitted: true }, { merge: true });
+        // Save final answers and statuses when setting isSubmitted: true
+        await setDoc(progressRef, { isSubmitted: true, answers, statuses }, { merge: true });
       }
 
       setExamPhase('submitted');

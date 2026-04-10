@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useUser, useClerk } from "@clerk/nextjs";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -11,7 +11,8 @@ import 'katex/dist/katex.min.css';
 import { doc, getDoc, updateDoc, onSnapshot, increment } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
-export default function StudentQuizPollPage() {
+// --- MAIN LOGIC COMPONENT ---
+function QuizPollContent() {
   const { user, isLoaded } = useUser();
   const { signOut } = useClerk();
   const router = useRouter();
@@ -28,7 +29,7 @@ export default function StudentQuizPollPage() {
 
   // --- LIVE DATA FROM FIREBASE ---
   const [roomData, setRoomData] = useState(null);
-  const [currentPollId, setCurrentPollId] = useState(null);
+  const [currentPollId, setCurrentPollId] = useState(null); // Tracks unique questions to prevent reset loops
   const [timeLeft, setTimeLeft] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState("");
   const [hasSubmitted, setHasSubmitted] = useState(false);
@@ -51,7 +52,7 @@ export default function StudentQuizPollPage() {
         throw new Error("Room not found. Check the code.");
       }
 
-      // Register student presence
+      // Register student presence without overwriting their score
       const studentName = user.fullName || "Student";
       await updateDoc(roomRef, {
         [`students.${studentName}`]: Date.now()
@@ -77,7 +78,7 @@ export default function StudentQuizPollPage() {
     }
   };
 
-  // Real-time Firebase Data Listener
+  // Real-time Firebase Data Listener (Only fetches data, does not force views)
   useEffect(() => {
     if (!roomCode) return;
 
@@ -98,7 +99,7 @@ export default function StudentQuizPollPage() {
     return () => unsubscribe();
   }, [roomCode]);
 
-  // State Transition Engine
+  // State Transition Engine (Safely handles view changes)
   useEffect(() => {
     if (!roomData || !user) return;
 
@@ -106,15 +107,18 @@ export default function StudentQuizPollPage() {
        setView("leaderboard");
     } 
     else if (roomData.status === "active") {
+       // Check if this is a BRAND NEW question using the expiresAt timestamp
        if (roomData.expiresAt !== currentPollId) {
           setCurrentPollId(roomData.expiresAt);
           
+          // Check if they ALREADY answered (e.g., if they refreshed the page)
           const studentName = user.fullName || "Student";
           if (roomData.responses && roomData.responses[studentName] !== undefined) {
              setSelectedAnswer(roomData.responses[studentName]);
              setHasSubmitted(true);
              setView("submitted");
           } else {
+             // Clean slate for new question
              setView("active");
              setHasSubmitted(false);
              setSelectedAnswer("");
@@ -136,6 +140,7 @@ export default function StudentQuizPollPage() {
         setTimeLeft(remaining);
         
         if (remaining === 0 && view === "active") {
+          // Auto-lock inputs when time ends locally
           setView("submitted");
           clearInterval(interval);
         }
@@ -156,6 +161,7 @@ export default function StudentQuizPollPage() {
         [`responses.${studentName}`]: selectedAnswer
       };
 
+      // ⚡ Securely award points
       if (isCorrect) {
          updatePayload[`scores.${studentName}`] = increment(1);
          setLastScoreGained(true);
@@ -176,6 +182,7 @@ export default function StudentQuizPollPage() {
 
   if (!isLoaded) return <div className="flex h-screen items-center justify-center bg-slate-50"><i className="fas fa-spinner fa-spin text-4xl text-indigo-600"></i></div>;
 
+  // Calculate Leaderboard for student view
   const leaderboard = Object.entries(roomData?.scores || {})
     .map(([name, score]) => ({ name, score }))
     .sort((a, b) => b.score - a.score);
@@ -227,7 +234,7 @@ export default function StudentQuizPollPage() {
              </div>
           </div>
           
-          {/* ⚡ NEW: "LEAVE ROOM" HEADER BUTTONS ⚡ */}
+          {/* ⚡ "LEAVE ROOM" & STATUS BUTTONS ⚡ */}
           {view !== "join" && (
             <div className="flex items-center gap-3">
               {roomData?.scores?.[user?.fullName || "Student"] !== undefined && (
@@ -406,6 +413,7 @@ export default function StudentQuizPollPage() {
                       </button>
                     )}
                     
+                    {/* View Leaderboard Button for Students */}
                     {(view === "submitted" || timeLeft === 0) && (
                       <button 
                         onClick={() => setView("leaderboard")}

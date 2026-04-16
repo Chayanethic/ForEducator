@@ -768,17 +768,19 @@ export default function StudentDashboard() {
         <i className="fas fa-calendar-check w-4"></i> Study Planner
     </button>
 
-    {/* Quiz Battle */}
-    <button id="tour-sidebar-quiz" onClick={() => navigateTo('/student/quiz-battle')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
-        <i className="fas fa-gamepad w-4 text-rose-400 group-hover:animate-bounce"></i> Quiz Battle
-    </button>
-
-    {/* --- LIVE QUIZ POLL --- */}
+       {/* --- LIVE QUIZ POLL --- */}
     <button onClick={() => navigateTo('/student/quiz-poll')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
         <i className="fas fa-satellite-dish w-4 text-teal-400 group-hover:animate-pulse"></i> Live Quiz Poll
         <span className="ml-auto bg-teal-500/20 text-teal-300 border border-teal-500/30 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">Live</span>
     </button>
     {/* ---------------------- */}
+
+    {/* Quiz Battle */}
+    <button id="tour-sidebar-quiz" onClick={() => navigateTo('/student/quiz-battle')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
+        <i className="fas fa-gamepad w-4 text-rose-400 group-hover:animate-bounce"></i> Quiz Battle
+    </button>
+
+ 
 </nav>
         
         <div className="p-3 border-t border-indigo-900 bg-indigo-900/30 space-y-1.5">

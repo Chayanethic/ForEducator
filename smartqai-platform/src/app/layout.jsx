@@ -14,7 +14,7 @@ export default function RootLayout({ children }) {
         'https://smartqai2.vercel.app'
       ]}
     >
-      <html lang="en">
+      <html lang="en" suppressHydrationWarning>
         <body className="bg-slate-50 text-slate-800 antialiased">
           {children}
         </body>

@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useUser, useClerk } from "@clerk/nextjs";
 import { collection, addDoc } from "firebase/firestore";
-// REMOVED Firebase Storage imports, keeping only DB
 import { db } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -111,7 +110,7 @@ const ImageCropperModal = ({ src, onCrop, onCancel }) => {
 };
 
 export default function CreateMockPage() {
-  const { user, isLoaded, isSignedIn } = useUser();
+  const { user, isLoaded } = useUser();
   const { signOut } = useClerk();
   const router = useRouter();
   
@@ -149,7 +148,7 @@ export default function CreateMockPage() {
   const [availability, setAvailability] = useState("always");
   const [examSections, setExamSections] = useState([{ name: "General", count: 0 }]);
 
-  // ⚡ NEW: SECURITY SETTINGS ⚡
+  // ⚡ SECURITY SETTINGS ⚡
   const [blockMobile, setBlockMobile] = useState(true);
   const [blockMultiple, setBlockMultiple] = useState(true);
   const [blockTabSwitch, setBlockTabSwitch] = useState(true);
@@ -240,7 +239,7 @@ export default function CreateMockPage() {
     }
   };
 
-  // ⚡ --- BULK CSV UPLOAD LOGIC --- ⚡
+  // ⚡ --- BULLETPROOF DYNAMIC CSV PARSER --- ⚡
   const parseCSV = (text) => {
     const result = [];
     let row = [];
@@ -279,27 +278,76 @@ export default function CreateMockPage() {
         const csvData = parseCSV(event.target.result);
         const parsedQs = [];
 
+        // 1. Identify the real header row (Ignore Instructions)
+        let ansIdx = 6; let marksIdx = 7; let negMarksIdx = 8; let expIdx = 9;
+        
+        const headerRow = csvData.find(row => row.some(cell => typeof cell === 'string' && cell.toLowerCase().includes('question text')));
+        
+        if (headerRow) {
+            ansIdx = headerRow.findIndex(cell => typeof cell === 'string' && cell.toLowerCase().includes('correct answer'));
+            marksIdx = headerRow.findIndex(cell => typeof cell === 'string' && cell.toLowerCase().includes('positive marks'));
+            negMarksIdx = headerRow.findIndex(cell => typeof cell === 'string' && cell.toLowerCase().includes('negative marks'));
+            expIdx = headerRow.findIndex(cell => typeof cell === 'string' && cell.toLowerCase().includes('explanation'));
+            
+            // Failsafes if columns are renamed
+            if (ansIdx === -1) ansIdx = 6;
+            if (marksIdx === -1) marksIdx = ansIdx + 1;
+            if (negMarksIdx === -1) negMarksIdx = ansIdx + 2;
+            if (expIdx === -1) expIdx = ansIdx + 3;
+        }
+
+        // 2. Loop through rows and extract
+        const maxPossibleOptions = Math.max(4, ansIdx - 2); // Count all columns between Question and Answer
+
         for (let i = 0; i < csvData.length; i++) {
-          const row = csvData[i];
+          let row = csvData[i];
           
+          // Skip invalid, empty, or instruction rows
           if (row.length < 2 || !row[1] || row[1].trim() === "") continue; 
+          if (row[0].toUpperCase().includes("INSTRUCTION") || row[1].toLowerCase().includes("question text")) continue;
 
-          const qTypeRaw = row[0]?.toUpperCase().trim();
-          if (!['MCQ', 'MSQ', 'NAT'].includes(qTypeRaw)) continue;
+          const qType = row[0]?.toUpperCase().trim();
+          if (!['MCQ', 'MSQ', 'NAT'].includes(qType)) continue;
 
-          const qType = qTypeRaw;
           const qText = row[1] || '';
-          const optA = row[2] || '';
-          const optB = row[3] || '';
-          const optC = row[4] || '';
-          const optD = row[5] || '';
-          let correctAns = row[6]?.trim() || '';
-          const marks = parseFloat(row[7]) || 2;
-          const negMarks = parseFloat(row[8]) || 0.66;
-          const explanation = row[9] || '';
+          let parsedOptions = [];
+          let correctAns = "";
+          let marks = 2;
+          let negMarks = 0.66;
+          let explanation = "";
+
+          if (qType === 'NAT') {
+            correctAns = row[ansIdx]?.trim() || '';
+            marks = parseFloat(row[marksIdx]) || 2;
+            negMarks = parseFloat(row[negMarksIdx]) || 0;
+            explanation = row[expIdx] || '';
+          } else {
+            // Find how many actual options they filled out
+            let lastValidOpt = -1;
+            for (let j = 0; j < maxPossibleOptions; j++) {
+               if ((row[2 + j] || '').trim() !== '') lastValidOpt = j;
+            }
+            
+            // Generate at least 4 options visually, or more if they provided them
+            const optionsToCreate = Math.max(4, lastValidOpt + 1);
+
+            for (let j = 0; j < optionsToCreate; j++) {
+              parsedOptions.push({
+                id: String.fromCharCode(65 + j), // A, B, C, D, E, F...
+                text: (row[2 + j] || '').trim(),
+                imageUrl: null
+              });
+            }
+            
+            // STRICT EXACT-MATCH UPPERCASE CORRECT ANSWER
+            correctAns = row[ansIdx]?.trim().toUpperCase() || '';
+            marks = parseFloat(row[marksIdx]) || 2;
+            negMarks = parseFloat(row[negMarksIdx]) || 0.66;
+            explanation = row[expIdx] || '';
+          }
 
           if (qType === 'MSQ') {
-             correctAns = correctAns.split(',').map(s => s.trim().toUpperCase());
+              correctAns = correctAns.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
           }
 
           parsedQs.push({
@@ -307,12 +355,7 @@ export default function CreateMockPage() {
             type: qType,
             hasImage: false,
             imageUrl: null,
-            options: qType === 'NAT' ? [] : [
-              { id: "A", text: optA, imageUrl: null },
-              { id: "B", text: optB, imageUrl: null },
-              { id: "C", text: optC, imageUrl: null },
-              { id: "D", text: optD, imageUrl: null }
-            ],
+            options: parsedOptions,
             correctAnswer: correctAns,
             explanation: explanation,
             explanationImage: null,
@@ -326,7 +369,7 @@ export default function CreateMockPage() {
         if (parsedQs.length > 0) {
           setQuestions(prev => [...prev, ...parsedQs]);
           setExpandedQIndex(questions.length); 
-          showToast(`Successfully imported ${parsedQs.length} questions from CSV!`, "success");
+          showToast(`Successfully extracted ${parsedQs.length} questions!`, "success");
         } else {
           showToast("No valid questions found. Ensure Column A is MCQ, MSQ, or NAT.", "warning");
         }
@@ -341,13 +384,15 @@ export default function CreateMockPage() {
     reader.readAsText(file);
   };
 
+  // ⚡ UPDATED TEMPLATE GENERATOR WITH 5 OPTIONS ⚡
   const downloadCsvTemplate = () => {
     const instructions = [
-      "🛑 INSTRUCTIONS (DO NOT EDIT HEADERS)",
+      "🛑 INSTRUCTIONS (DO NOT EDIT OR DELETE HEADERS)",
       "1. Column A MUST be either MCQ, MSQ, or NAT.",
-      "2. For NAT leave Options A-D blank.",
-      "3. For MSQ separate correct answers with commas (e.g. A,C)",
-      "4. Save as .csv and upload.",
+      "2. To add more options (like Option F, Option G), just insert new columns BEFORE the 'Correct Answer' column.",
+      "3. For NAT (Numerical Answer Type), leave all Option columns blank.",
+      "4. For MSQ (Multiple Select), separate correct answers with commas (e.g. A,C,E)",
+      "5. Save as .csv and upload.",
       "", "", "", "", ""
     ];
 
@@ -358,17 +403,19 @@ export default function CreateMockPage() {
       "🅱️ Option B",
       "©️ Option C",
       "🎯 Option D",
+      "✨ Option E",
       "✅ Correct Answer (e.g. A or A,C)",
       "➕ Positive Marks",
       "➖ Negative Marks",
       "💡 Explanation (Optional)"
     ];
 
-    const example1 = ["MCQ", "What is the capital of India?", "Mumbai", "New Delhi", "Chennai", "Kolkata", "B", "2", "0.66", "New Delhi is the capital."];
-    const example2 = ["MSQ", "Which of these are programming languages?", "Python", "HTML", "Java", "CSS", "A,C", "2", "0", "Python and Java are programming languages."];
-    const example3 = ["NAT", "Calculate: 15 + 27", "", "", "", "", "42", "2", "0", "Simple addition."];
+    const example1 = ["MCQ", "What is the capital of India?", "Mumbai", "New Delhi", "Chennai", "Kolkata", "", "B", "2", "0.66", "New Delhi is the capital."];
+    const example2 = ["MSQ", "Which of these are programming languages?", "Python", "HTML", "Java", "CSS", "C++", "A,C,E", "2", "0", "Python, Java, and C++ are programming languages."];
+    const example3 = ["MCQ", "Which planet is closest to the sun?", "Venus", "Earth", "Mars", "Mercury", "Jupiter", "D", "1", "0.33", "Mercury is the closest planet."];
+    const example4 = ["NAT", "Calculate: 15 + 27", "", "", "", "", "", "42", "2", "0", "Simple addition."];
     
-    const emptyRow = ["MCQ", "", "", "", "", "", "", "2", "0.66", ""];
+    const emptyRow = ["MCQ", "", "", "", "", "", "", "", "2", "0.66", ""];
 
     const csvContent = [
       instructions.map(e => `"${e}"`).join(","),
@@ -376,7 +423,7 @@ export default function CreateMockPage() {
       example1.map(e => `"${e}"`).join(","),
       example2.map(e => `"${e}"`).join(","),
       example3.map(e => `"${e}"`).join(","),
-      emptyRow.map(e => `"${e}"`).join(","),
+      example4.map(e => `"${e}"`).join(","),
       emptyRow.map(e => `"${e}"`).join(","),
       emptyRow.map(e => `"${e}"`).join(",")
     ].join("\n");
@@ -496,6 +543,42 @@ export default function CreateMockPage() {
       return updated;
     });
     setTimeout(() => scrollToQuestion(questions.length), 100); 
+  };
+
+  // ⚡ DYNAMIC OPTIONS FUNCTIONS ⚡
+  const addOption = (qIndex) => {
+    setQuestions(prev => {
+        const updated = [...prev];
+        const currentOptions = updated[qIndex].options || [];
+        if (currentOptions.length >= 10) {
+            showToast("Maximum of 10 options allowed.", "warning");
+            return updated;
+        }
+        const nextId = String.fromCharCode(65 + currentOptions.length); // Next Letter (E, F, G...)
+        updated[qIndex].options.push({ id: nextId, text: "", imageUrl: null });
+        return updated;
+    });
+  };
+
+  const removeOption = (qIndex, optIndex) => {
+    setQuestions(prev => {
+        const updated = [...prev];
+        updated[qIndex].options.splice(optIndex, 1);
+        
+        // Re-assign alphabet IDs to keep them sequential (A, B, C...)
+        updated[qIndex].options.forEach((opt, idx) => {
+            opt.id = String.fromCharCode(65 + idx);
+        });
+        
+        // Fix correctAnswer if it was relying on a deleted option
+        if (updated[qIndex].type === 'MCQ') {
+           const validIds = updated[qIndex].options.map(o => o.id);
+           if (!validIds.includes(updated[qIndex].correctAnswer)) {
+               updated[qIndex].correctAnswer = validIds[0] || "";
+           }
+        }
+        return updated;
+    });
   };
 
   const initiateImageUpload = (imageFile, qIndex, type = 'question', optIndex = null) => {
@@ -645,7 +728,7 @@ export default function CreateMockPage() {
           const shuffledOptions = [...data.options].sort(() => Math.random() - 0.5);
           
           finalQuestions[qIndex].options = shuffledOptions.map((text, idx) => ({
-              id: ["A", "B", "C", "D"][idx],
+              id: String.fromCharCode(65 + idx), // dynamic IDs based on API return
               text: text,
               hasImage: false,
               imageUrl: null
@@ -668,7 +751,7 @@ export default function CreateMockPage() {
         ].sort(() => Math.random() - 0.5);
 
         finalQuestions[qIndex].options = fallbackOptions.map((text, idx) => ({
-            id: ["A", "B", "C", "D"][idx],
+            id: String.fromCharCode(65 + idx),
             text: text,
             hasImage: false,
             imageUrl: null
@@ -1084,7 +1167,6 @@ export default function CreateMockPage() {
             <button onClick={() => setShowSettingsModal(true)} className="flex-1 md:flex-none justify-center bg-slate-100 text-slate-600 px-3 py-2 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-sm hover:bg-slate-200 transition flex items-center gap-2 border border-slate-200">
               <i className="fas fa-cog"></i> <span>Settings</span>
             </button>
-            {/* ⚡ UPDATED: Opens the Deploy Confirmation Modal instead of saving instantly */}
             <button id="tour-publish" onClick={confirmDeploy} disabled={questions.length === 0 || uploadingCount > 0 || isPublishing} className="flex-1 md:flex-none justify-center bg-emerald-600 text-white px-4 py-2 md:px-6 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-md hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
               {isPublishing ? <><i className="fas fa-spinner fa-spin"></i> <span>Deploying...</span></> : <><i className="fas fa-paper-plane"></i> Publish</>}
             </button>
@@ -1102,7 +1184,7 @@ export default function CreateMockPage() {
 
           <div className={`flex-1 flex flex-col bg-slate-50 transition-all duration-500 overflow-hidden ${pdfUrl ? 'h-1/2 lg:h-full lg:w-1/2' : 'h-full w-full'}`}>
             
-            {/* ⚡ NEW: BULK CSV UPLOAD BAR ⚡ */}
+            {/* ⚡ BULK CSV UPLOAD BAR ⚡ */}
             <div id="tour-pdf-extract" className="bg-white p-3 md:p-4 border-b border-slate-200 shrink-0 shadow-sm flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between z-10">
               <div className="flex items-center gap-2 w-full xl:w-auto overflow-x-auto pb-1 xl:pb-0">
                 <label className="flex-1 xl:flex-none justify-center bg-emerald-50 border border-emerald-300 text-emerald-700 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-emerald-100 transition flex items-center shadow-sm whitespace-nowrap">
@@ -1235,12 +1317,17 @@ export default function CreateMockPage() {
                               </div>
                             ) : (
                               <>
-                                <div className="flex justify-between items-center mb-3">
+                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-3">
                                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Answer Choices</span>
-                                  <button onClick={() => generateOptions(qIndex)} disabled={q.isGeneratingOptions} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[10px] font-black px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow-sm border border-indigo-200 disabled:opacity-50">
-                                    {q.isGeneratingOptions ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-wand-magic-sparkles"></i>} 
-                                    <span className="hidden sm:inline">AI Auto-Fill Options</span>
-                                  </button>
+                                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                                    <button onClick={() => addOption(qIndex)} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-black px-3 py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 shadow-sm border border-emerald-200 flex-1 sm:flex-none">
+                                      <i className="fas fa-plus"></i> Add Option
+                                    </button>
+                                    <button onClick={() => generateOptions(qIndex)} disabled={q.isGeneratingOptions} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[10px] font-black px-3 py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 shadow-sm border border-indigo-200 disabled:opacity-50 flex-1 sm:flex-none">
+                                      {q.isGeneratingOptions ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-wand-magic-sparkles"></i>} 
+                                      <span className="hidden sm:inline">AI Auto-Fill</span>
+                                    </button>
+                                  </div>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                                   {q.options?.map((opt, optIndex) => {
@@ -1250,10 +1337,17 @@ export default function CreateMockPage() {
                                         <input type={q.type === "MSQ" ? "checkbox" : "radio"} checked={isCorrect} onChange={() => q.type === "MSQ" ? toggleMsqAnswer(qIndex, opt.id) : updateQuestionField(qIndex, 'correctAnswer', opt.id)} className="mt-2 w-4 h-4 accent-emerald-600 cursor-pointer shrink-0" />
                                         <div className="flex-1 min-w-0">
                                           <div className="relative mb-2">
-                                            <input type="text" value={opt.text} onChange={(e) => updateOptionText(qIndex, optIndex, e.target.value)} onPaste={(e) => handlePaste(e, qIndex, 'option', optIndex)} placeholder={`Option ${opt.id}...`} className={`w-full bg-white border border-slate-300 rounded-lg p-2.5 pr-10 text-xs font-bold text-slate-900 focus:border-indigo-500 outline-none shadow-sm ${q.isGeneratingOptions ? 'opacity-50 animate-pulse' : ''}`} disabled={q.isGeneratingOptions} />
-                                            <button onClick={() => toggleDictation(qIndex, 'option', optIndex)} className={`absolute top-1.5 right-1.5 p-1.5 rounded transition border ${listeningField === `q-${qIndex}-opt-${optIndex}` ? 'bg-rose-100 text-rose-600 border-rose-200 animate-pulse' : 'bg-slate-100 text-slate-400 border-transparent hover:text-indigo-600 hover:bg-white hover:border-slate-200'}`}>
-                                              <i className="fas fa-microphone"></i>
-                                            </button>
+                                            <input type="text" value={opt.text} onChange={(e) => updateOptionText(qIndex, optIndex, e.target.value)} onPaste={(e) => handlePaste(e, qIndex, 'option', optIndex)} placeholder={`Option ${opt.id}...`} className={`w-full bg-white border border-slate-300 rounded-lg p-2.5 pr-16 text-xs font-bold text-slate-900 focus:border-indigo-500 outline-none shadow-sm ${q.isGeneratingOptions ? 'opacity-50 animate-pulse' : ''}`} disabled={q.isGeneratingOptions} />
+                                            <div className="absolute top-1.5 right-1.5 flex gap-1">
+                                                <button onClick={() => toggleDictation(qIndex, 'option', optIndex)} className={`p-1.5 rounded transition border ${listeningField === `q-${qIndex}-opt-${optIndex}` ? 'bg-rose-100 text-rose-600 border-rose-200 animate-pulse' : 'bg-slate-100 text-slate-400 border-transparent hover:text-indigo-600 hover:bg-white hover:border-slate-200'}`}>
+                                                  <i className="fas fa-microphone"></i>
+                                                </button>
+                                                {q.options.length > 2 && (
+                                                    <button onClick={() => removeOption(qIndex, optIndex)} className="p-1.5 rounded transition border bg-slate-100 text-rose-400 border-transparent hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200" title="Remove Option">
+                                                        <i className="fas fa-trash"></i>
+                                                    </button>
+                                                )}
+                                            </div>
                                           </div>
                                           <div className="flex flex-col sm:flex-row sm:items-center justify-between mt-1 px-1 gap-2">
                                              <div className="text-[10px] font-black text-slate-700 truncate overflow-x-auto max-w-[150px]"><Latex>{opt.text}</Latex></div>

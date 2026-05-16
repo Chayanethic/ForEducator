@@ -3,7 +3,6 @@
 import { useState, useEffect, Suspense } from "react";
 import { useUser, useClerk } from "@clerk/nextjs";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import Latex from "react-latex-next";
 import 'katex/dist/katex.min.css';
 
@@ -11,10 +10,13 @@ import 'katex/dist/katex.min.css';
 import { doc, getDoc, updateDoc, onSnapshot, increment } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
+// ⚡ IMPORT GUEST BLOCKER ⚡
+import GuestBlocker from "@/components/GuestBlocker";
+
 // ⚡ EXPLICITLY TELL NEXT.JS NOT TO STATICALLY BUILD THIS PAGE ⚡
 export const dynamic = "force-dynamic";
 
-// --- 1. THE MAIN LOGIC COMPONENT (Notice there is no "export default" here) ---
+// --- 1. THE MAIN LOGIC COMPONENT ---
 function QuizPollContent() {
   const { user, isLoaded } = useUser();
   const { signOut } = useClerk();
@@ -41,11 +43,45 @@ function QuizPollContent() {
   // Join Room
   const handleJoinRoom = async (e) => {
     e.preventDefault();
-    if (!user || !roomCode) return;
+    if (!roomCode) return;
     
     setIsConnecting(true);
     setServerError("");
+
+    // ⚡ GUEST MODE SIMULATION: Bypasses API to save costs and demonstrates feature! ⚡
+    if (!user) {
+      setTimeout(() => {
+        setRoomCode("DEMO99");
+        setRoomData({
+          status: "waiting",
+          question: null,
+          scores: { "Guest Student": 0, "Alex (Demo)": 1 },
+          responses: {}
+        });
+        setView("waiting");
+        setIsConnecting(false);
+
+        // Auto-trigger a simulated question after 4 seconds
+        setTimeout(() => {
+          setRoomData(prev => ({
+            ...prev,
+            status: "active",
+            expiresAt: Date.now() + 30000, // 30 seconds timer
+            question: {
+              text: "Which of the following is a dynamically typed programming language?",
+              type: "multiple-choice",
+              options: ["Java", "C++", "JavaScript", "Rust"],
+              correctAnswer: "JavaScript"
+            },
+            responses: {}
+          }));
+          setView("active");
+        }, 4000);
+      }, 1500); // Wait 1.5s to simulate joining
+      return;
+    }
     
+    // ⚡ REAL FIREBASE CONNECTION (For Logged In Students) ⚡
     try {
       const code = roomCode.toUpperCase();
       const roomRef = doc(db, "live_polls", code);
@@ -83,7 +119,8 @@ function QuizPollContent() {
 
   // Real-time Firebase Data Listener
   useEffect(() => {
-    if (!roomCode) return;
+    // Prevent fetching if guest mode simulated room
+    if (!roomCode || roomCode === "DEMO99" || !user) return;
 
     const roomRef = doc(db, "live_polls", roomCode);
     const unsubscribe = onSnapshot(roomRef, (snapshot) => {
@@ -99,11 +136,11 @@ function QuizPollContent() {
     });
 
     return () => unsubscribe();
-  }, [roomCode]);
+  }, [roomCode, user]);
 
   // State Transition Engine 
   useEffect(() => {
-    if (!roomData || !user) return;
+    if (!roomData) return; // Allow Guest demo data to pass through without user check
 
     if (roomData.status === "leaderboard") {
        setView("leaderboard");
@@ -112,7 +149,7 @@ function QuizPollContent() {
        if (roomData.expiresAt !== currentPollId) {
           setCurrentPollId(roomData.expiresAt);
           
-          const studentName = user.fullName || "Student";
+          const studentName = user?.fullName || "Guest Student";
           if (roomData.responses && roomData.responses[studentName] !== undefined) {
              setSelectedAnswer(roomData.responses[studentName]);
              setHasSubmitted(true);
@@ -210,13 +247,29 @@ function QuizPollContent() {
             </button>
         </nav>
         <div className="p-3 border-t border-slate-800 space-y-1.5">
-            <div className="flex items-center gap-2.5 p-2.5 bg-slate-800/50 rounded-xl border border-slate-700/50 mb-2">
-                <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Student"} alt="Avatar" className="w-7 h-7 rounded-full border border-slate-600" />
-                <div className="text-xs font-bold truncate flex-1 text-slate-300">{user?.fullName || "Account"}</div>
-            </div>
-            <button onClick={() => signOut({ redirectUrl: '/' })} className="w-full flex items-center justify-center gap-2 text-rose-400 hover:bg-rose-500 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-rose-900/50 bg-rose-950/20">
-                <i className="fas fa-sign-out-alt"></i> Log Out
-            </button>
+            {user ? (
+              <>
+                <div className="flex items-center gap-2.5 p-2.5 bg-slate-800/50 rounded-xl border border-slate-700/50 mb-2">
+                    <img src={user.imageUrl || "https://ui-avatars.com/api/?name=Student"} alt="Avatar" className="w-7 h-7 rounded-full border border-slate-600" />
+                    <div className="text-xs font-bold truncate flex-1 text-slate-300">{user.fullName || "Account"}</div>
+                </div>
+                <button onClick={() => signOut({ redirectUrl: '/' })} className="w-full flex items-center justify-center gap-2 text-rose-400 hover:bg-rose-500 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-rose-900/50 bg-rose-950/20">
+                    <i className="fas fa-sign-out-alt"></i> Log Out
+                </button>
+              </>
+            ) : (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-3 bg-slate-800/50 p-2.5 rounded-xl border border-slate-700/50">
+                  <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center text-white"><i className="fas fa-user-secret text-xs"></i></div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-white">Guest Mode</span>
+                  </div>
+                </div>
+                <button onClick={() => router.push('/sign-in?role=student')} className="w-full bg-emerald-500 text-white text-xs font-black py-2 rounded-xl hover:bg-emerald-400 transition shadow-md">
+                  Sign In
+                </button>
+              </div>
+            )}
         </div>
       </aside>
 
@@ -232,9 +285,9 @@ function QuizPollContent() {
           
           {view !== "join" && (
             <div className="flex items-center gap-3">
-              {roomData?.scores?.[user?.fullName || "Student"] !== undefined && (
+              {roomData?.scores?.[user?.fullName || "Guest Student"] !== undefined && (
                 <div className="hidden sm:flex bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg text-xs font-black shadow-sm items-center gap-1.5">
-                   <i className="fas fa-star"></i> {roomData.scores[user?.fullName || "Student"]} pts
+                   <i className="fas fa-star"></i> {roomData.scores[user?.fullName || "Guest Student"]} pts
                 </div>
               )}
               <button onClick={handleLeaveRoom} className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-black shadow-sm flex items-center gap-1.5 transition">
@@ -272,8 +325,9 @@ function QuizPollContent() {
                     placeholder="e.g. A1B2C3" 
                     required
                     maxLength={6}
-                    className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl p-4 text-center text-2xl font-black text-slate-800 outline-none focus:border-indigo-500 transition tracking-widest uppercase shadow-inner" 
+                    className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl p-4 text-center text-2xl font-black text-slate-800 outline-none focus:border-indigo-500 transition tracking-widest uppercase shadow-inner placeholder-slate-300" 
                   />
+                  {/* Notice: No GuestBlocker here. Let them click to simulate! */}
                   <button 
                     type="submit"
                     disabled={isConnecting || !roomCode}
@@ -397,15 +451,18 @@ function QuizPollContent() {
                         </div>
                       </div>
                     ) : (
-                      <button 
-                        onClick={submitAnswer}
-                        disabled={!selectedAnswer}
-                        className={`w-full py-4 rounded-xl font-black shadow-lg transition flex items-center justify-center gap-2 text-lg mb-4
-                          ${!selectedAnswer ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:-translate-y-1 shadow-indigo-600/30'}
-                        `}
-                      >
-                        Submit Answer <i className="fas fa-paper-plane"></i>
-                      </button>
+                      /* ⚡ GUEST BLOCKER SECURING THE EXAM SUBMISSION ⚡ */
+                      <GuestBlocker role="student">
+                        <button 
+                          onClick={submitAnswer}
+                          disabled={!selectedAnswer}
+                          className={`w-full py-4 rounded-xl font-black shadow-lg transition flex items-center justify-center gap-2 text-lg mb-4
+                            ${!selectedAnswer ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:-translate-y-1 shadow-indigo-600/30'}
+                          `}
+                        >
+                          Submit Answer <i className="fas fa-paper-plane"></i>
+                        </button>
+                      </GuestBlocker>
                     )}
                     
                     {(view === "submitted" || timeLeft === 0) && (
@@ -437,7 +494,7 @@ function QuizPollContent() {
                      ) : (
                        <div className="space-y-3">
                          {leaderboard.map((student, idx) => {
-                           const isMe = student.name === (user?.fullName || "Student");
+                           const isMe = student.name === (user?.fullName || "Guest Student");
                            return (
                              <div key={student.name} className={`flex items-center justify-between p-4 rounded-xl shadow-sm border-2 transition-all
                                ${isMe ? 'bg-indigo-50 border-indigo-500 scale-105 my-2 z-10 shadow-md' : 'bg-white border-slate-100'}

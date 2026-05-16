@@ -490,11 +490,27 @@ export default function CreateMockPage() {
     recognition.start();
   };
 
+  // ⚡ GUEST MODE SIMULATION FOR AI EXTRACT ⚡
   const handleExtract = async (e) => {
     e.preventDefault();
     if (!file) return showToast("Please select a PDF file first.", "warning");
 
     setIsProcessing(true);
+
+    if (!user) {
+      setTimeout(() => {
+        const dummyQs = [
+          { text: "Based on the uploaded document, what is the primary function of the core architecture?", type: "MCQ", options: [{id:"A", text:"Data routing"}, {id:"B", text:"State management"}, {id:"C", text:"Process termination"}, {id:"D", text:"Redundancy"}], correctAnswer: "B", marks: 2, negativeMarks: 0.66, imageUrl: null, explanationImage: null, isGeneratingOptions: false, isGeneratingSolution: false },
+          { text: "Identify the false statement regarding the module parameters.", type: "MCQ", options: [{id:"A", text:"It requires async operations"}, {id:"B", text:"It is synchronous only"}, {id:"C", text:"It returns a Promise"}, {id:"D", text:"None of the above"}], correctAnswer: "B", marks: 2, negativeMarks: 0.66, imageUrl: null, explanationImage: null, isGeneratingOptions: false, isGeneratingSolution: false }
+        ];
+        setQuestions(prev => [...prev, ...dummyQs]);
+        setExpandedQIndex(questions.length);
+        setIsProcessing(false);
+        showToast("Extracted 2 questions! (Guest Simulation)", "success");
+      }, 2500);
+      return;
+    }
+
     const formData = new FormData();
     formData.append("pdf", file); 
     formData.append("startPage", startPage); 
@@ -690,6 +706,7 @@ export default function CreateMockPage() {
     });
   };
 
+  // ⚡ GUEST MODE SIMULATION FOR AI AUTO-FILL ⚡
   const generateOptions = async (qIndex) => {
     const q = questions[qIndex];
     if (!q.text || q.text.trim() === "") return showToast("Type a question first!", "warning");
@@ -698,6 +715,31 @@ export default function CreateMockPage() {
     updatedLoading[qIndex].isGeneratingOptions = true;
     setQuestions(updatedLoading);
     showToast("✨ AI is crafting contextual options...", "success");
+
+    if (!user) {
+      setTimeout(() => {
+        const finalQuestions = [...questions];
+        const fallbackOptions = [
+          "Hypothetical correct statement related to question",
+          "Common misconception often chosen by students",
+          "Mathematically correct but irrelevant derivative",
+          "Inverse relation or opposite logical conclusion"
+        ].sort(() => Math.random() - 0.5);
+
+        finalQuestions[qIndex].options = fallbackOptions.map((text, idx) => ({
+            id: String.fromCharCode(65 + idx),
+            text: text,
+            hasImage: false,
+            imageUrl: null
+        }));
+        
+        finalQuestions[qIndex].correctAnswer = "";
+        finalQuestions[qIndex].isGeneratingOptions = false;
+        setQuestions(finalQuestions);
+        showToast("Options Generated & Shuffled (Guest Simulation)", "success");
+      }, 1500);
+      return;
+    }
 
     try {
       const response = await fetch("/api/generate-options", {
@@ -727,30 +769,14 @@ export default function CreateMockPage() {
           showToast("Options Generated & Shuffled!", "success");
       }
     } catch (error) {
-      setTimeout(() => {
-        const finalQuestions = [...questions];
-        const fallbackOptions = [
-          "Related conceptual distractor",
-          "Common misconception answer",
-          "Mathematically correct derivative",
-          "Inverse relation option"
-        ].sort(() => Math.random() - 0.5);
-
-        finalQuestions[qIndex].options = fallbackOptions.map((text, idx) => ({
-            id: String.fromCharCode(65 + idx),
-            text: text,
-            hasImage: false,
-            imageUrl: null
-        }));
-        
-        finalQuestions[qIndex].correctAnswer = "";
-        finalQuestions[qIndex].isGeneratingOptions = false;
-        setQuestions(finalQuestions);
-        showToast("Options Generated & Shuffled (Demo Mode)", "success");
-      }, 1500);
+      showToast("AI Generation Failed. Please try again.", "error");
+      const finalQuestions = [...questions];
+      finalQuestions[qIndex].isGeneratingOptions = false;
+      setQuestions(finalQuestions);
     }
   };
 
+  // ⚡ GUEST MODE SIMULATION FOR AI SOLVE ⚡
   const generateSolution = async (qIndex) => {
     const q = questions[qIndex];
     if (!q.text || q.text.trim() === "") return showToast("Question is empty!", "warning");
@@ -760,6 +786,17 @@ export default function CreateMockPage() {
     setQuestions(updatedLoading);
     showToast("✨ AI is analyzing and solving...", "success");
     
+    if (!user) {
+      setTimeout(() => {
+        const finalQuestions = [...questions];
+        finalQuestions[qIndex].explanation = `**Step 1: Extract Given Data**\nWe analyze the core parameters provided in the question.\n\n**Step 2: Apply Governing Formula**\nWe use the formula: $$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$\n\n**Step 3: Final Calculation**\nThe final derived value matches exactly with the expected concept.\n\nTherefore, this is the correct logical path.`;
+        finalQuestions[qIndex].isGeneratingSolution = false;
+        setQuestions(finalQuestions);
+        showToast("Solution Generated (Guest Simulation)", "success");
+      }, 2000);
+      return;
+    }
+
     try {
       const response = await fetch("/api/solve-question", {
         method: "POST",
@@ -778,13 +815,10 @@ export default function CreateMockPage() {
       showToast("Solution Generated Successfully!", "success");
       
     } catch (error) {
-      setTimeout(() => {
-        const finalQuestions = [...questions];
-        finalQuestions[qIndex].explanation = `**Step 1: Extract Given Data**\nWe analyze the core parameters provided in the question.\n\n**Step 2: Apply Governing Formula**\nWe use the formula: $$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$\n\n**Step 3: Final Calculation**\nThe final derived value matches exactly with the expected concept.\n\nTherefore, this is the correct logical path.`;
-        finalQuestions[qIndex].isGeneratingSolution = false;
-        setQuestions(finalQuestions);
-        showToast("Solution Generated (Demo)", "success");
-      }, 2000);
+       showToast("AI Solution Generation Failed.", "error");
+       const finalQuestions = [...questions];
+       finalQuestions[qIndex].isGeneratingSolution = false;
+       setQuestions(finalQuestions);
     }
   };
 
@@ -829,7 +863,7 @@ export default function CreateMockPage() {
   };
 
   if (!isLoaded) return (
-    <div className="flex h-screen items-center justify-center bg-slate-50 flex-col animate-in fade-in duration-500">
+    <div className="flex h-full items-center justify-center bg-slate-50 flex-col animate-in fade-in duration-500">
       <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-indigo-700 text-indigo-50 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-xl shadow-indigo-900/30 border border-indigo-400/30 transform -rotate-3 animate-pulse">
         <i className="fas fa-book-open-reader"></i>
       </div>
@@ -838,8 +872,8 @@ export default function CreateMockPage() {
   );
 
   return (
-    // ⚡ FULLY INTEGRATED: Removed absolute inset/fixed heights so it flows within the layout ⚡
-    <div className="flex flex-col h-full bg-slate-100 font-sans relative overflow-hidden">
+    // ⚡ FIXED: Absolute Inset-0 overrides standard scrolling so the 2-column layout perfectly fills the layout.jsx container ⚡
+    <div className="absolute inset-0 flex flex-col bg-slate-100 font-sans overflow-hidden">
       
       <EducatorTour userId={user?.id} />
 
@@ -1103,7 +1137,7 @@ export default function CreateMockPage() {
         </div>
       )}
 
-      {/* --- STICKY HEADER --- */}
+      {/* --- HEADER --- */}
       <header className="bg-white border-b border-slate-200 h-auto md:h-16 py-3 px-4 md:px-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-0 z-20 shrink-0 shadow-sm">
         <div className="flex items-center gap-3 w-full md:max-w-[60%]">
            
@@ -1119,12 +1153,9 @@ export default function CreateMockPage() {
             <i className="fas fa-cog"></i> <span>Settings</span>
           </button>
           
-          {/* ⚡ GUEST BLOCKER FOR PUBLISH ⚡ */}
-          <GuestBlocker role="educator">
-            <button id="tour-publish" onClick={confirmDeploy} disabled={questions.length === 0 || uploadingCount > 0 || isPublishing} className="flex-1 md:flex-none justify-center bg-emerald-600 text-white px-4 py-2 md:px-6 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-md hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-              {isPublishing ? <><i className="fas fa-spinner fa-spin"></i> <span>Deploying...</span></> : <><i className="fas fa-paper-plane"></i> Publish</>}
-            </button>
-          </GuestBlocker>
+          <button id="tour-publish" onClick={confirmDeploy} disabled={questions.length === 0 || uploadingCount > 0 || isPublishing} className="flex-1 md:flex-none justify-center bg-emerald-600 text-white px-4 py-2 md:px-6 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-md hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+            {isPublishing ? <><i className="fas fa-spinner fa-spin"></i> <span>Deploying...</span></> : <><i className="fas fa-paper-plane"></i> Publish</>}
+          </button>
         </div>
       </header>
 
@@ -1178,12 +1209,9 @@ export default function CreateMockPage() {
                   </label>
                </div>
 
-               {/* ⚡ GUEST BLOCKER FOR AI PDF EXTRACT ⚡ */}
-               <GuestBlocker role="educator">
-                 <button onClick={handleExtract} disabled={!file || isProcessing} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-md hover:bg-indigo-600 disabled:opacity-50 disabled:bg-slate-400 transition flex items-center gap-1.5">
-                   {isProcessing ? <><i className="fas fa-spinner fa-spin"></i></> : <><i className="fas fa-magic"></i> <span className="hidden sm:block">Extract</span></>}
-                 </button>
-               </GuestBlocker>
+               <button onClick={handleExtract} disabled={!file || isProcessing} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-md hover:bg-indigo-600 disabled:opacity-50 disabled:bg-slate-400 transition flex items-center gap-1.5">
+                 {isProcessing ? <><i className="fas fa-spinner fa-spin"></i></> : <><i className="fas fa-magic"></i> <span className="hidden sm:block">Extract</span></>}
+               </button>
             </div>
           </div>
 
@@ -1286,13 +1314,10 @@ export default function CreateMockPage() {
                                     <i className="fas fa-plus"></i> Add Option
                                   </button>
                                   
-                                  {/* ⚡ GUEST BLOCKER FOR AI AUTO FILL ⚡ */}
-                                  <GuestBlocker role="educator">
-                                    <button onClick={() => generateOptions(qIndex)} disabled={q.isGeneratingOptions} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[10px] font-black px-3 py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 shadow-sm border border-indigo-200 disabled:opacity-50 flex-1 sm:flex-none">
-                                      {q.isGeneratingOptions ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-wand-magic-sparkles"></i>} 
-                                      <span className="hidden sm:inline">AI Auto-Fill</span>
-                                    </button>
-                                  </GuestBlocker>
+                                  <button onClick={() => generateOptions(qIndex)} disabled={q.isGeneratingOptions} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[10px] font-black px-3 py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 shadow-sm border border-indigo-200 disabled:opacity-50 flex-1 sm:flex-none">
+                                    {q.isGeneratingOptions ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-wand-magic-sparkles"></i>} 
+                                    <span className="hidden sm:inline">AI Auto-Fill</span>
+                                  </button>
                                 </div>
                               </div>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -1346,13 +1371,10 @@ export default function CreateMockPage() {
                                   <input type="file" accept="image/*" className="hidden" onChange={(e) => initiateImageUpload(e.target.files[0], qIndex, 'explanation')} />
                                 </label>
                                 
-                                {/* ⚡ GUEST BLOCKER FOR AI SOLVE ⚡ */}
-                                <GuestBlocker role="educator">
-                                  <button onClick={() => generateSolution(qIndex)} disabled={q.isGeneratingSolution} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black px-3 py-1.5 rounded-lg shadow-sm transition flex items-center justify-center gap-1.5 flex-1 sm:flex-none disabled:opacity-50">
-                                    {q.isGeneratingSolution ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-wand-magic-sparkles"></i>} 
-                                    AI Solve
-                                  </button>
-                                </GuestBlocker>
+                                <button onClick={() => generateSolution(qIndex)} disabled={q.isGeneratingSolution} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black px-3 py-1.5 rounded-lg shadow-sm transition flex items-center justify-center gap-1.5 flex-1 sm:flex-none disabled:opacity-50">
+                                  {q.isGeneratingSolution ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-wand-magic-sparkles"></i>} 
+                                  AI Solve
+                                </button>
                               </div>
                             </div>
                             

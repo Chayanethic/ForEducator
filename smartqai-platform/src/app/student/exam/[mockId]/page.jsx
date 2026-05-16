@@ -10,6 +10,9 @@ import { useParams, useRouter } from "next/navigation";
 import 'katex/dist/katex.min.css';
 import Latex from 'react-latex-next';
 
+// ⚡ IMPORT GUEST BLOCKER ⚡
+import GuestBlocker from "@/components/GuestBlocker";
+
 // --- DRAGGABLE CALCULATOR COMPONENT ---
 const DraggableCalculator = ({ onClose }) => {
   const [position, setPosition] = useState({ x: 100, y: 100 });
@@ -358,6 +361,51 @@ export default function ExamInterface() {
   useEffect(() => {
     const fetchExamAndProgress = async () => {
       if (!mockId) return;
+
+      // ⚡ GUEST MODE SIMULATION: Inject Dummy Data ⚡
+      if (mockId.startsWith("DEMO") || !user) {
+        const dummyDuration = 30;
+        setMockDetails({ 
+          id: mockId, 
+          title: "AI Assessment (Demo Mode)", 
+          duration: dummyDuration, 
+          allowCalculator: true, 
+          blockMobile: true, 
+          blockMultiple: true, 
+          blockTabSwitch: true,
+          spotlightMode: false 
+        });
+        const dummyQs = [
+          { 
+            text: "Based on the provided context, which of the following best describes the principle of conservation of energy?", 
+            type: "MCQ", 
+            options: [
+              { id: "A", text: "Energy can be created but not destroyed." },
+              { id: "B", text: "Energy can neither be created nor destroyed, only transformed." },
+              { id: "C", text: "Energy is constantly increasing in a closed system." },
+              { id: "D", text: "Energy transformation always results in 100% efficiency." }
+            ], 
+            correctAnswer: "B", marks: 2, negativeMarks: 0.66, section: "General" 
+          },
+          { 
+            text: "Calculate the value of $x$ if $3x + 9 = 24$.", 
+            type: "NAT", 
+            correctAnswer: "5", marks: 2, negativeMarks: 0, section: "Mathematics" 
+          }
+        ];
+        setQuestions(dummyQs);
+        setUniqueSections(["General", "Mathematics"]);
+        setActiveSection("General");
+        
+        const initialStatuses = Array(dummyQs.length).fill('not-visited');
+        initialStatuses[0] = 'not-answered';
+        setStatuses(initialStatuses);
+        setTimeLeft(dummyDuration * 60);
+        setExamPhase('instructions');
+        return;
+      }
+
+      // ⚡ REAL FIREBASE FETCH FOR LOGGED-IN USERS ⚡
       try {
         const mockRef = doc(db, "mocks", mockId); 
         let mockSnap = await getDoc(mockRef);
@@ -447,7 +495,7 @@ export default function ExamInterface() {
 
   // ⚡ 2-MINUTE HEARTBEAT SYNC (Captures Time Left safely) ⚡
   useEffect(() => {
-    if (examPhase !== 'active' || !user || !mockDetails) return;
+    if (examPhase !== 'active' || !user || !mockDetails || mockId.startsWith("DEMO")) return;
     
     const intervalSave = setInterval(async () => {
        try {
@@ -465,9 +513,8 @@ export default function ExamInterface() {
   }, [examPhase, user, mockDetails, mockId]);
 
   // ⚡ DEBOUNCED CLOUD SYNC ENGINE ⚡
-  // Automatically waits 2.5 seconds after a student stops clicking before writing to Firebase
   const saveProgressToCloud = (newAnswers, newStatuses) => {
-    if (!user || !mockDetails) return;
+    if (!user || !mockDetails || mockId.startsWith("DEMO")) return;
     
     // Clear previous pending save if user clicks again quickly
     if (saveTimeoutRef.current) {
@@ -733,6 +780,13 @@ export default function ExamInterface() {
   };
 
   const executeSubmit = async () => {
+    // ⚡ Guest Mode Redirect! ⚡
+    if (!user) {
+       exitFullScreen();
+       router.push("/sign-up?role=student");
+       return;
+    }
+
     setExamPhase('submitting');
     exitFullScreen();
     setIsBlurred(false);
@@ -897,7 +951,7 @@ export default function ExamInterface() {
             </div>
           </div>
 
-          <div className="p-6 bg-slate-100 border-t border-slate-200">
+          <div className="p-6 bg-slate-100 border-t border-slate-200 w-full max-w-4xl rounded-b-2xl shadow-xl">
             <label className="flex items-start gap-3 cursor-pointer p-4 bg-white rounded-xl border border-slate-200 hover:border-indigo-400 transition shadow-sm">
               <input type="checkbox" checked={hasAcceptedRules} onChange={(e) => setHasAcceptedRules(e.target.checked)} className="mt-1 w-5 h-5 accent-indigo-600 cursor-pointer" />
               <span className="text-sm font-bold text-slate-700">I have read and understood the instructions. I agree that in case of not adhering to the instructions, including AI detection of unauthorized devices or persons, I will be disqualified.</span>
@@ -947,9 +1001,10 @@ export default function ExamInterface() {
   const localQuestionNumber = currentSectionQuestions.findIndex(q => q.globalIndex === currentIndex) + 1;
 
   return (
+    // ⚡ Ensuring this div takes full screen since student/layout.jsx strips away its layout ⚡
     <div 
       ref={containerRef} 
-      className="bg-slate-50 text-slate-900 font-sans h-screen flex flex-col overflow-hidden select-none relative"
+      className="bg-slate-50 text-slate-900 font-sans h-full flex flex-col overflow-hidden select-none relative w-full"
       onContextMenu={(e) => e.preventDefault()} 
       onCopy={(e) => e.preventDefault()} 
     >
@@ -959,7 +1014,7 @@ export default function ExamInterface() {
         <div className="fixed inset-0 pointer-events-none z-[9998] opacity-[0.03] overflow-hidden flex flex-wrap justify-center items-center gap-10 rotate-[-25deg] select-none">
           {Array.from({ length: 50 }).map((_, i) => (
             <span key={i} className="text-2xl font-black text-slate-900 whitespace-nowrap">
-              {user?.primaryEmailAddress?.emailAddress || "Student"} • {user?.fullName || "Name"} • EXAM-{mockId.slice(-6)}
+              {user?.primaryEmailAddress?.emailAddress || "Guest Student"} • {user?.fullName || "Name"} • EXAM-{mockId.slice(-6)}
             </span>
           ))}
         </div>
@@ -1303,12 +1358,15 @@ export default function ExamInterface() {
             </div>
 
             <div className="p-5 bg-white border-t border-slate-200 flex justify-center shrink-0">
-              <button 
-                onClick={triggerSubmitConfirmation}
-                className="w-full bg-indigo-600 text-white py-3.5 rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition transform hover:-translate-y-0.5"
-              >
-                  Submit Exam
-              </button>
+              {/* ⚡ GUEST BLOCKER SECURING EXAM SUBMISSION ⚡ */}
+              <GuestBlocker role="student">
+                <button 
+                  onClick={triggerSubmitConfirmation}
+                  className="w-full bg-indigo-600 text-white py-3.5 rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition transform hover:-translate-y-0.5"
+                >
+                    Submit Exam
+                </button>
+              </GuestBlocker>
             </div>
           </aside>
 

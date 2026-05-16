@@ -40,7 +40,8 @@ export default function EducatorQuizPollPage() {
 
   // Real-time Firebase Listener
   useEffect(() => {
-    if (!roomCode) return;
+    // ⚡ Guests don't connect to Firebase! ⚡
+    if (!roomCode || !user) return;
 
     const roomRef = doc(db, "live_polls", roomCode);
     const unsubscribe = onSnapshot(roomRef, (snapshot) => {
@@ -52,7 +53,7 @@ export default function EducatorQuizPollPage() {
     });
 
     return () => unsubscribe();
-  }, [roomCode]);
+  }, [roomCode, user]);
 
   // Local Timer Engine (Driven by Firebase expiresAt timestamp)
   useEffect(() => {
@@ -73,9 +74,25 @@ export default function EducatorQuizPollPage() {
   }, [roomData]);
 
   const handleCreateRoom = async () => {
-    if (!user) return; // Handled by GuestBlocker, but safety catch
     setIsConnecting(true);
     
+    // ⚡ GUEST MODE SIMULATION: Create a fake room to explore the UI ⚡
+    if (!user) {
+      setTimeout(() => {
+        setRoomCode("DEMO99");
+        setRoomData({
+          status: "waiting",
+          students: { "Alex (Demo)": true, "Sarah (Demo)": true },
+          responses: {},
+          scores: { "Alex (Demo)": 0, "Sarah (Demo)": 0 }
+        });
+        setView("dashboard");
+        setIsConnecting(false);
+      }, 1200);
+      return;
+    }
+
+    // ⚡ REAL FIREBASE ROOM CREATION ⚡
     try {
       const code = Math.random().toString(36).substring(2, 8).toUpperCase();
       const roomRef = doc(db, "live_polls", code);
@@ -174,7 +191,7 @@ export default function EducatorQuizPollPage() {
   // Syncs the entire classroom to the Leaderboard screen
   const handleShowLeaderboard = async () => {
     setView("leaderboard");
-    if (roomCode) {
+    if (roomCode && user) {
        await updateDoc(doc(db, "live_polls", roomCode), { status: "leaderboard" });
     }
   };
@@ -182,13 +199,21 @@ export default function EducatorQuizPollPage() {
   // Syncs the entire classroom back to the Waiting screen
   const handleBackToStudio = async () => {
     setView("dashboard");
-    if (roomCode) {
+    if (roomCode && user) {
        await updateDoc(doc(db, "live_polls", roomCode), { status: "waiting" });
     }
   };
 
   const handleEndRoom = async () => {
     if (confirm("Are you sure you want to close this room? All students will be disconnected.")) {
+      // ⚡ Handle Guest Mode Ending ⚡
+      if (!user) {
+        setRoomCode(null);
+        setRoomData(null);
+        setView("create");
+        return;
+      }
+
       try {
         await deleteDoc(doc(db, "live_polls", roomCode));
         setRoomCode(null);
@@ -218,16 +243,15 @@ export default function EducatorQuizPollPage() {
     .sort((a, b) => b.score - a.score);
 
   return (
-    // ⚡ Removed outer layout wrappers to fit perfectly into Educator Layout ⚡
+    // ⚡ Removed outer layout sidebars to fit perfectly into Educator Layout ⚡
     <div className="flex flex-col relative w-full h-full bg-slate-50 selection:bg-teal-100 selection:text-teal-900 overflow-hidden">
       
+      {/* ⚡ HEADER: Standardized and Sidebar-Toggle removed ⚡ */}
       <header className="bg-white border-b border-slate-200 h-16 px-4 md:px-6 flex justify-between items-center z-20 shrink-0 shadow-sm sticky top-0">
         <div className="flex items-center gap-3">
-           <div>
-             <h1 className="text-lg md:text-xl font-black text-slate-900 flex items-center gap-2">
-               <i className="fas fa-satellite-dish text-indigo-600"></i> Live Poll Studio
-             </h1>
-           </div>
+           <h1 className="text-lg md:text-xl font-black text-slate-900 flex items-center gap-2">
+             <i className="fas fa-satellite-dish text-indigo-600"></i> Live Poll Studio
+           </h1>
         </div>
         {roomCode && (
           <div className="flex gap-2">
@@ -250,16 +274,14 @@ export default function EducatorQuizPollPage() {
               <h2 className="text-3xl font-black text-slate-900 mb-3 tracking-tight">Start a Live Classroom Poll</h2>
               <p className="text-slate-500 font-medium mb-8">Create an instant room. Students join via a 6-digit code, answer questions, and compete on the leaderboard!</p>
               
-              {/* ⚡ GUEST BLOCKER FOR ROOM CREATION ⚡ */}
-              <GuestBlocker role="educator">
-                <button 
-                  onClick={handleCreateRoom}
-                  disabled={isConnecting}
-                  className="w-full max-w-sm mx-auto bg-indigo-600 text-white font-black py-4 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-2 text-lg"
-                >
-                  {isConnecting ? <><i className="fas fa-circle-notch fa-spin"></i> Generating Room...</> : <><i className="fas fa-play"></i> Create Live Room</>}
-                </button>
-              </GuestBlocker>
+              {/* ⚡ REMOVED GuestBlocker from here! Guests CAN create demo rooms. ⚡ */}
+              <button 
+                onClick={handleCreateRoom}
+                disabled={isConnecting}
+                className="w-full max-w-sm mx-auto bg-indigo-600 text-white font-black py-4 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-2 text-lg disabled:opacity-50"
+              >
+                {isConnecting ? <><i className="fas fa-circle-notch fa-spin"></i> Generating Room...</> : <><i className="fas fa-play"></i> Create Live Room</>}
+              </button>
             </div>
           )}
 
@@ -420,13 +442,16 @@ export default function EducatorQuizPollPage() {
                         </label>
                       </div>
                       
-                      <button 
-                        onClick={handleStartPoll} 
-                        disabled={roomData?.status === "active" && timeLeft > 0}
-                        className="bg-indigo-600 text-white font-black px-8 py-3 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                      >
-                        {roomData?.status === "active" && timeLeft > 0 ? <><i className="fas fa-spinner fa-spin"></i> Poll Running</> : <><i className="fas fa-paper-plane"></i> Launch Poll</>}
-                      </button>
+                      {/* ⚡ GUEST BLOCKER ADDED HERE: Cannot push poll to Firebase unless signed in ⚡ */}
+                      <GuestBlocker role="educator">
+                        <button 
+                          onClick={handleStartPoll} 
+                          disabled={roomData?.status === "active" && timeLeft > 0}
+                          className="bg-indigo-600 text-white font-black px-8 py-3 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          {roomData?.status === "active" && timeLeft > 0 ? <><i className="fas fa-spinner fa-spin"></i> Poll Running</> : <><i className="fas fa-paper-plane"></i> Launch Poll</>}
+                        </button>
+                      </GuestBlocker>
                     </div>
                     
                     {formError && <p className="text-rose-600 text-xs font-bold bg-rose-50 border border-rose-200 p-3 rounded-lg flex items-center gap-2 mt-2"><i className="fas fa-exclamation-circle"></i> {formError}</p>}

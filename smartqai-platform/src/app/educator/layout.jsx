@@ -12,7 +12,7 @@ export default function EducatorLayout({ children }) {
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Safely wait for Clerk to load, but DO NOT block guests!
+  // ⚡ Safely wait for Clerk to load, but DO NOT block guests! ⚡
   if (!isLoaded) {
     return (
       <div className="h-screen flex items-center justify-center bg-slate-50">
@@ -27,26 +27,29 @@ export default function EducatorLayout({ children }) {
     router.push(path);
   };
 
+  // Helper function to keep active states clean, even for sub-routes
+  const isActive = (path) => pathname === path || pathname.startsWith(`${path}/`);
+
   const NavLinks = () => (
     <>
-      <button onClick={() => navigateTo('/educator/dashboard')} className={`w-full text-left flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition-colors ${pathname === '/educator/dashboard' ? 'bg-indigo-800 text-white border-l-4 border-emerald-400 shadow-inner' : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'}`}>
+      <button onClick={() => navigateTo('/educator/dashboard')} className={`w-full text-left flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition-colors ${isActive('/educator/dashboard') ? 'bg-indigo-800 text-white border-l-4 border-emerald-400 shadow-inner' : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'}`}>
         <i className="fas fa-home w-4"></i> Dashboard
       </button>
       
-      <button onClick={() => navigateTo('/educator/create-mock')} className={`w-full text-left flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition-colors ${pathname === '/educator/create-mock' ? 'bg-indigo-800 text-white border-l-4 border-emerald-400 shadow-inner' : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'}`}>
+      <button onClick={() => navigateTo('/educator/create-mock')} className={`w-full text-left flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition-colors ${isActive('/educator/create-mock') ? 'bg-indigo-800 text-white border-l-4 border-emerald-400 shadow-inner' : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'}`}>
         <i className="fas fa-file-pdf w-4"></i> Exam Studio
       </button>
       
-      <button onClick={() => navigateTo('/educator/live-rooms')} className={`w-full text-left flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition-colors ${pathname.includes('/educator/live-rooms') ? 'bg-indigo-800 text-white border-l-4 border-emerald-400 shadow-inner' : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'}`}>
+      <button onClick={() => navigateTo('/educator/live-rooms')} className={`w-full text-left flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition-colors ${isActive('/educator/live-rooms') ? 'bg-indigo-800 text-white border-l-4 border-emerald-400 shadow-inner' : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'}`}>
         <i className="fas fa-door-open w-4"></i> Live Rooms
       </button>
       
-      <button onClick={() => navigateTo('/educator/exam-generator')} className={`w-full text-left flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition-colors group ${pathname === '/educator/exam-generator' ? 'bg-indigo-800 text-white border-l-4 border-emerald-400 shadow-inner' : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'}`}>
-        <i className={`fas fa-brain w-4 text-fuchsia-400 ${pathname !== '/educator/exam-generator' && 'group-hover:animate-pulse'}`}></i> AI Exam Generator
+      <button onClick={() => navigateTo('/educator/exam-generator')} className={`w-full text-left flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition-colors group ${isActive('/educator/exam-generator') ? 'bg-indigo-800 text-white border-l-4 border-emerald-400 shadow-inner' : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'}`}>
+        <i className={`fas fa-brain w-4 text-fuchsia-400 ${!isActive('/educator/exam-generator') ? 'group-hover:animate-pulse' : ''}`}></i> AI Exam Generator
         <span className="ml-auto bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">New</span>
       </button>
       
-      <button onClick={() => navigateTo('/educator/quiz-poll')} className={`w-full text-left flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition-colors ${pathname === '/educator/quiz-poll' ? 'bg-indigo-800 text-white border-l-4 border-emerald-400 shadow-inner' : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'}`}>
+      <button onClick={() => navigateTo('/educator/quiz-poll')} className={`w-full text-left flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition-colors ${isActive('/educator/quiz-poll') ? 'bg-indigo-800 text-white border-l-4 border-emerald-400 shadow-inner' : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'}`}>
         <i className="fas fa-bolt w-4"></i> Live Quiz Poll
       </button>
     </>
@@ -123,7 +126,7 @@ export default function EducatorLayout({ children }) {
       {/* --- MAIN CONTENT WRAPPER --- */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         {/* Mobile Header (Only visible on small screens) */}
-        <header className="md:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shrink-0 z-20">
+        <header className="md:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shrink-0 z-20 shadow-sm">
           <button onClick={() => setIsMobileMenuOpen(true)} className="text-slate-600 hover:text-indigo-600 transition">
             <i className="fas fa-bars text-xl"></i>
           </button>
@@ -131,8 +134,8 @@ export default function EducatorLayout({ children }) {
           <div className="w-6"></div> {/* Spacer for centering */}
         </header>
 
-        {/* This is where your page.jsx content will be injected automatically! */}
-        <main className="flex-1 overflow-y-auto bg-slate-50 relative">
+        {/* Content injected here */}
+        <main className="flex-1 overflow-y-auto bg-slate-50 relative flex flex-col">
           {children}
         </main>
       </div>

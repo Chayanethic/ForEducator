@@ -1,29 +1,17 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useUser, useOrganizationList } from "@clerk/nextjs";
+import { useUser } from "@clerk/nextjs"; // ⚡ Removed useOrganizationList to stop forced redirects!
 import { collection, query, where, getDocs, orderBy, limit } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
-
-// ⚡ IMPORT THE GUEST BLOCKER ⚡
-import GuestBlocker from "@/components/GuestBlocker";
 
 export default function EducatorDashboard() {
   const { user, isLoaded: isUserLoaded } = useUser();
   const router = useRouter();
   
-  const { setActive, isLoaded: isOrgListLoaded } = useOrganizationList();
-  
   const [recentRooms, setRecentRooms] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-
-  // Force Clerk into Personal Workspace (Solo Mode) on Load
-  useEffect(() => {
-    if (isOrgListLoaded && setActive) {
-      setActive({ organization: null });
-    }
-  }, [isOrgListLoaded, setActive]);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -57,7 +45,7 @@ export default function EducatorDashboard() {
 
   return (
     <>
-      {/* ⚡ HEADER: Uses sticky positioning to stay at the top of the layout's main scroll area ⚡ */}
+      {/* ⚡ HEADER ⚡ */}
       <header className="bg-white shadow-sm p-4 md:p-6 flex justify-between items-center z-10 sticky top-0 border-b border-slate-200">
         <div className="flex items-center gap-4">
           <h1 className="text-xl md:text-2xl font-black text-slate-900">Dashboard</h1>
@@ -75,29 +63,24 @@ export default function EducatorDashboard() {
           <h2 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-4">Quick Actions</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             
-            <GuestBlocker role="educator">
-              <div onClick={() => router.push('/educator/create-mock')} className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-6 rounded-2xl shadow-lg cursor-pointer hover:-translate-y-1 transition transform group h-full border border-indigo-500">
-                <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-white text-2xl mb-4 group-hover:scale-110 transition shadow-inner"><i className="fas fa-magic"></i></div>
-                <h3 className="text-white font-black text-lg mb-1">AI Exam Builder</h3>
-                <p className="text-indigo-100 text-xs font-medium">Extract PDFs or build from scratch.</p>
-              </div>
-            </GuestBlocker>
+            {/* ⚡ GUEST BLOCKERS REMOVED FROM CARDS SO GUESTS CAN ROUTE TO DEMO PAGES ⚡ */}
+            <div onClick={() => router.push('/educator/create-mock')} className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-6 rounded-2xl shadow-lg cursor-pointer hover:-translate-y-1 transition transform group h-full border border-indigo-500">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-white text-2xl mb-4 group-hover:scale-110 transition shadow-inner"><i className="fas fa-magic"></i></div>
+              <h3 className="text-white font-black text-lg mb-1">AI Exam Builder</h3>
+              <p className="text-indigo-100 text-xs font-medium">Extract PDFs or build from scratch.</p>
+            </div>
 
-            <GuestBlocker role="educator">
-              <div onClick={() => router.push('/educator/quiz-poll')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 cursor-pointer hover:border-amber-300 hover:shadow-md transition transform group h-full">
-                <div className="w-12 h-12 bg-amber-50 text-amber-500 rounded-xl flex items-center justify-center text-2xl mb-4 group-hover:scale-110 group-hover:bg-amber-500 group-hover:text-white transition shadow-sm border border-amber-100"><i className="fas fa-bolt"></i></div>
-                <h3 className="text-slate-900 font-black text-lg mb-1">Live Quiz Poll</h3>
-                <p className="text-slate-500 text-xs font-medium">Host a quick real-time question.</p>
-              </div>
-            </GuestBlocker>
+            <div onClick={() => router.push('/educator/quiz-poll')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 cursor-pointer hover:border-amber-300 hover:shadow-md transition transform group h-full">
+              <div className="w-12 h-12 bg-amber-50 text-amber-500 rounded-xl flex items-center justify-center text-2xl mb-4 group-hover:scale-110 group-hover:bg-amber-500 group-hover:text-white transition shadow-sm border border-amber-100"><i className="fas fa-bolt"></i></div>
+              <h3 className="text-slate-900 font-black text-lg mb-1">Live Quiz Poll</h3>
+              <p className="text-slate-500 text-xs font-medium">Host a quick real-time question.</p>
+            </div>
 
-            <GuestBlocker role="educator">
-              <div onClick={() => router.push('/educator/live-rooms')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 cursor-pointer hover:border-emerald-300 hover:shadow-md transition transform group h-full">
-                <div className="w-12 h-12 bg-emerald-50 text-emerald-500 rounded-xl flex items-center justify-center text-2xl mb-4 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-white transition shadow-sm border border-emerald-100"><i className="fas fa-door-open"></i></div>
-                <h3 className="text-slate-900 font-black text-lg mb-1">Manage Rooms</h3>
-                <p className="text-slate-500 text-xs font-medium">View active exam leaderboards.</p>
-              </div>
-            </GuestBlocker>
+            <div onClick={() => router.push('/educator/live-rooms')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 cursor-pointer hover:border-emerald-300 hover:shadow-md transition transform group h-full">
+              <div className="w-12 h-12 bg-emerald-50 text-emerald-500 rounded-xl flex items-center justify-center text-2xl mb-4 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-white transition shadow-sm border border-emerald-100"><i className="fas fa-door-open"></i></div>
+              <h3 className="text-slate-900 font-black text-lg mb-1">Manage Rooms</h3>
+              <p className="text-slate-500 text-xs font-medium">View active exam leaderboards.</p>
+            </div>
 
           </div>
         </div>
@@ -121,9 +104,7 @@ export default function EducatorDashboard() {
                  </div>
                  <div className="flex items-center gap-3">
                    <span className="bg-indigo-50 text-indigo-700 font-mono font-black text-xs px-3 py-1.5 rounded-lg border border-indigo-100">ID: {room.id}</span>
-                   <GuestBlocker role="educator">
-                     <button onClick={() => router.push(`/educator/live-rooms/${room.id}`)} className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">View Results</button>
-                   </GuestBlocker>
+                   <button onClick={() => router.push(`/educator/live-rooms/${room.id}`)} className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">View Results</button>
                  </div>
                </div>
              )) : (
@@ -133,11 +114,9 @@ export default function EducatorDashboard() {
                   </div>
                   <h3 className="text-sm font-black text-slate-800 mb-1">No exams created yet.</h3>
                   <p className="text-xs font-medium text-slate-500 mb-4">Generate your first mock assessment to see it here.</p>
-                  <GuestBlocker role="educator">
-                    <button onClick={() => router.push('/educator/create-mock')} className="text-indigo-600 font-bold hover:underline flex items-center gap-1.5 bg-indigo-50 px-4 py-2 rounded-lg border border-indigo-100 transition-colors">
-                      <i className="fas fa-plus"></i> Create Exam
-                    </button>
-                  </GuestBlocker>
+                  <button onClick={() => router.push('/educator/create-mock')} className="text-indigo-600 font-bold hover:underline flex items-center gap-1.5 bg-indigo-50 px-4 py-2 rounded-lg border border-indigo-100 transition-colors">
+                    <i className="fas fa-plus"></i> Create Exam
+                  </button>
                </div>
              )}
            </div>

@@ -90,7 +90,7 @@ export default function FlashcardPlayer() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#FAFAFA] flex flex-col items-center justify-center">
+      <div className="h-full bg-[#FAFAFA] flex flex-col items-center justify-center">
         <div className="w-12 h-12 bg-white rounded-2xl shadow-sm border border-slate-200 flex items-center justify-center mb-6">
           <i className="fas fa-circle-notch fa-spin text-xl text-indigo-500"></i>
         </div>
@@ -101,7 +101,7 @@ export default function FlashcardPlayer() {
 
   if (error || cards.length === 0) {
     return (
-      <div className="min-h-screen bg-[#FAFAFA] flex flex-col items-center justify-center p-6 text-center">
+      <div className="h-full bg-[#FAFAFA] flex flex-col items-center justify-center p-6 text-center">
         <div className="bg-white rounded-3xl p-10 md:p-12 shadow-sm border border-slate-200/60 max-w-md w-full flex flex-col items-center">
           <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center text-2xl mb-6 shadow-inner border border-rose-100/50">
             <i className="fas fa-exclamation-triangle"></i>
@@ -120,14 +120,15 @@ export default function FlashcardPlayer() {
   const progressPercentage = ((currentIndex + 1) / cards.length) * 100;
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA] font-sans flex flex-col overflow-hidden relative text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
+    // ⚡ Removed min-h-screen to fit into layout ⚡
+    <div className="flex flex-col h-full bg-[#FAFAFA] font-sans relative overflow-hidden text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
       
       {/* Refined Ambient Background */}
-      <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.02] pointer-events-none mix-blend-overlay"></div>
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[500px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-100/30 via-[#FAFAFA] to-[#FAFAFA] pointer-events-none"></div>
+      <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.02] pointer-events-none mix-blend-overlay z-0"></div>
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[500px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-100/30 via-[#FAFAFA] to-[#FAFAFA] pointer-events-none z-0"></div>
 
       {/* Sleek Header */}
-      <header className="relative z-20 px-6 md:px-8 py-6 flex justify-between items-center max-w-5xl mx-auto w-full">
+      <header className="relative z-20 px-6 md:px-8 py-6 flex justify-between items-center max-w-5xl mx-auto w-full shrink-0">
         <div className="flex items-center gap-4">
           <Link href="/student/flashcard-generator" className="group flex items-center justify-center w-9 h-9 rounded-full bg-white border border-slate-200 hover:border-slate-300 transition-all shadow-sm text-slate-400 hover:text-slate-700">
             <i className="fas fa-arrow-left text-xs"></i>
@@ -144,7 +145,7 @@ export default function FlashcardPlayer() {
       </header>
 
       {/* Micro-Progress Bar */}
-      <div className="w-full max-w-5xl mx-auto px-6 md:px-8 relative z-20 mb-2">
+      <div className="w-full max-w-5xl mx-auto px-6 md:px-8 relative z-20 mb-2 shrink-0">
         <div className="w-full h-1 bg-slate-200/60 rounded-full overflow-hidden">
           <div 
             className="h-full bg-indigo-500 rounded-full transition-all duration-500 ease-out"
@@ -153,9 +154,10 @@ export default function FlashcardPlayer() {
         </div>
       </div>
 
+      {/* Scrollable Main Area */}
       <main className="flex-1 overflow-y-auto px-4 pb-32 pt-6 flex flex-col items-center justify-center relative z-10">
         
-        {/* PREMIUM 3D FLIP CONTAINER - Resized to professional dimensions */}
+        {/* PREMIUM 3D FLIP CONTAINER */}
         <div className="w-full max-w-3xl aspect-[4/3] md:aspect-[3/2] perspective-1000 group cursor-pointer" onClick={() => setIsFlipped(!isFlipped)}>
           <div 
             className="relative w-full h-full duration-500 transition-transform" 
@@ -223,8 +225,9 @@ export default function FlashcardPlayer() {
       </main>
 
       {/* FLOATING GLASSMORPHIC CONTROL DOCK */}
-      <div className="fixed bottom-6 md:bottom-10 left-1/2 -translate-x-1/2 z-50 w-full max-w-[320px] px-4">
-        <div className="bg-white/80 backdrop-blur-xl border border-slate-200/80 p-1.5 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] flex items-center justify-between">
+      {/* ⚡ Adjusted z-index to stay above main content but below modals ⚡ */}
+      <div className="absolute bottom-6 md:bottom-10 left-1/2 -translate-x-1/2 z-40 w-full max-w-[320px] px-4 pointer-events-none">
+        <div className="bg-white/80 backdrop-blur-xl border border-slate-200/80 p-1.5 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] flex items-center justify-between pointer-events-auto">
           
           <button 
             onClick={(e) => { e.stopPropagation(); handlePrev(); }}

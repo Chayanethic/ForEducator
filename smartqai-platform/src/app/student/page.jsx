@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useUser, useOrganizationList } from "@clerk/nextjs";
+import { useUser, useClerk } from "@clerk/nextjs"; // ⚡ Removed useOrganizationList
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, limit, startAfter } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
@@ -10,21 +11,24 @@ import { db } from "@/lib/firebase";
 import 'katex/dist/katex.min.css';
 import Latex from 'react-latex-next';
 
-// --- IMPORT GUEST BLOCKER & TOUR ---
+// --- COMPONENTS ---
 import ProductTour from "@/components/ProductTour";
 import GuestBlocker from "@/components/GuestBlocker";
 
 const CATEGORIES = ["GATE ECE", "GATE CS", "GATE EE", "GATE ME", "JEE Mains", "SSC CGL"];
 
 export default function StudentDashboard() {
-  const { user, isLoaded } = useUser();
+  const { user, isLoaded, isSignedIn } = useUser();
+  const { signOut } = useClerk(); 
   const router = useRouter();
-  const { setActive, isLoaded: isOrgListLoaded } = useOrganizationList();
-
+  
+  // --- UI & FEED STATE ---
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("GATE ECE");
   const [publicMocks, setPublicMocks] = useState([]);
   const [activeProgress, setActiveProgress] = useState([]);
   
+  // --- PAGINATION STATE FOR RECENT EXAMS ---
   const [pastResults, setPastResults] = useState([]); 
   const [lastVisibleDoc, setLastVisibleDoc] = useState(null);
   const [hasMoreResults, setHasMoreResults] = useState(true);
@@ -35,6 +39,7 @@ export default function StudentDashboard() {
   const [isLoadingMain, setIsLoadingMain] = useState(true);
   const [isLoadingFeed, setIsLoadingFeed] = useState(true);
 
+  // --- PROFESSIONAL ALERT/TOAST SYSTEM ---
   const [toast, setToast] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
 
@@ -43,9 +48,11 @@ export default function StudentDashboard() {
     setTimeout(() => setToast(null), 4000);
   };
 
+  // --- ACTIVE ROADMAP & CALENDAR STATE ---
   const [activeRoadmap, setActiveRoadmap] = useState(null);
   const [justCompletedDay, setJustCompletedDay] = useState(null);
 
+  // --- STUDENT DEEP-DIVE MODAL STATE ---
   const [selectedResult, setSelectedResult] = useState(null);
   const [modalQuestions, setModalQuestions] = useState([]); 
   const [isFetchingReport, setIsFetchingReport] = useState(false);
@@ -53,16 +60,13 @@ export default function StudentDashboard() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [diagnosticReport, setDiagnosticReport] = useState(null);
 
+  // --- CALENDAR HELPERS ---
   const today = new Date();
   const currentMonth = today.getMonth();
   const currentYear = today.getFullYear();
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
   const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-  useEffect(() => {
-    if (isOrgListLoaded && setActive) setActive({ organization: null });
-  }, [isOrgListLoaded, setActive]);
 
   useEffect(() => {
     const fetchPersonalData = async () => {
@@ -72,13 +76,20 @@ export default function StudentDashboard() {
         return;
       }
       try {
+        // 1. Fetch In-Progress Exams
         const progressRef = collection(db, "progress");
         const qProgress = query(progressRef, where("studentId", "==", user.id), where("isSubmitted", "==", false));
         const progressSnap = await getDocs(qProgress);
         setActiveProgress(progressSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
+        // 2. Fetch Recent Completed Exams (PAGINATED)
         const resultsRef = collection(db, "results");
-        const qResults = query(resultsRef, where("studentId", "==", user.id), orderBy("submittedAt", "desc"), limit(5));
+        const qResults = query(
+          resultsRef, 
+          where("studentId", "==", user.id),
+          orderBy("submittedAt", "desc"),
+          limit(5)
+        );
         const resultsSnap = await getDocs(qResults);
         
         let fetchedResults = resultsSnap.docs.map(d => ({ 
@@ -89,6 +100,7 @@ export default function StudentDashboard() {
         setLastVisibleDoc(resultsSnap.docs[resultsSnap.docs.length - 1]); 
         if (resultsSnap.docs.length < 5) setHasMoreResults(false);
 
+        // 3. Fetch Active Roadmap
         const rmRef = collection(db, "roadmaps");
         const qRm = query(rmRef, where("studentId", "==", user.id));
         const rmSnap = await getDocs(qRm);
@@ -109,7 +121,13 @@ export default function StudentDashboard() {
     setIsLoadingMore(true);
     try {
       const resultsRef = collection(db, "results");
-      const qResults = query(resultsRef, where("studentId", "==", user.id), orderBy("submittedAt", "desc"), startAfter(lastVisibleDoc), limit(5));
+      const qResults = query(
+        resultsRef, 
+        where("studentId", "==", user.id),
+        orderBy("submittedAt", "desc"),
+        startAfter(lastVisibleDoc),
+        limit(5)
+      );
       const resultsSnap = await getDocs(qResults);
       
       let fetchedResults = resultsSnap.docs.map(d => ({ 
@@ -119,6 +137,7 @@ export default function StudentDashboard() {
       setPastResults(prev => [...prev, ...fetchedResults]);
       setLastVisibleDoc(resultsSnap.docs[resultsSnap.docs.length - 1]);
       if (resultsSnap.docs.length < 5) setHasMoreResults(false);
+      
     } catch (error) {
       showToast("Failed to load more exams.", "error");
     } finally {
@@ -131,7 +150,6 @@ export default function StudentDashboard() {
       setIsLoadingFeed(true);
       try {
         const mocksRef = collection(db, "mocks");
-        // ⚡ Guests CAN see public mocks! ⚡
         const qPublic = query(mocksRef, where("visibility", "==", "public"), where("status", "==", "published"), where("examCategory", "==", selectedCategory));
         const publicSnap = await getDocs(qPublic);
         let fetchedPublic = publicSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -146,6 +164,7 @@ export default function StudentDashboard() {
     if (isLoaded) fetchPublicFeed();
   }, [selectedCategory, isLoaded]);
 
+  // --- CALENDAR LOGIC ---
   const getRoadmapDayForDate = (targetDateObj, roadmapStartDate, timeframe) => {
     if (!roadmapStartDate) return null;
     const start = new Date(roadmapStartDate.toDate ? roadmapStartDate.toDate() : roadmapStartDate);
@@ -155,14 +174,18 @@ export default function StudentDashboard() {
 
     const diffTime = target.getTime() - start.getTime();
     const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+    
     if (diffDays >= 0 && diffDays < timeframe) return diffDays + 1;
     return null;
   };
 
   const toggleRoadmapDay = async (dayNumber, isToday) => {
-    if (!user) return showToast("Guests cannot edit roadmaps.", "error");
+    if (!user) return showToast("Guests cannot edit roadmaps.", "warning");
     if (!activeRoadmap || !activeRoadmap.plan) return;
-    if (!isToday) return showToast("You can only check off today's goal!", "error");
+    if (!isToday) {
+      showToast("You can only check off today's goal!", "error");
+      return;
+    }
     
     let newCompletedDays = [...(activeRoadmap.completedDays || [])];
     let newStreak = activeRoadmap.streak || 0;
@@ -182,7 +205,10 @@ export default function StudentDashboard() {
     setActiveRoadmap(updatedData);
 
     try {
-      await updateDoc(doc(db, "roadmaps", activeRoadmap.id), { completedDays: newCompletedDays, streak: newStreak });
+      await updateDoc(doc(db, "roadmaps", activeRoadmap.id), {
+        completedDays: newCompletedDays,
+        streak: newStreak
+      });
     } catch (e) {
       showToast("Failed to sync progress.", "error");
     }
@@ -206,8 +232,11 @@ export default function StudentDashboard() {
 
   const handleJoinRoom = async (e) => {
     e.preventDefault();
-    if (!user) return; // Handled by GuestBlocker visually, but safety check
     if (!joinCode.trim()) return;
+    if (!user) {
+      router.push("/sign-in?role=student");
+      return;
+    }
     setIsJoining(true);
     try {
       const mockRef = doc(db, "mocks", joinCode.trim());
@@ -221,6 +250,7 @@ export default function StudentDashboard() {
     }
   };
 
+  // --- REPORT & DIAGNOSTIC LOGIC ---
   const openReportModal = async (result) => {
     setIsFetchingReport(true);
     setSelectedResult(result);
@@ -319,6 +349,7 @@ export default function StudentDashboard() {
       
       if (!response.ok) throw new Error("Failed to fetch diagnostics.");
       const data = await response.json();
+      
       if (data.diagnostics && data.diagnostics.topics) {
         setDiagnosticReport(data.diagnostics);
       } else {
@@ -349,6 +380,7 @@ export default function StudentDashboard() {
   }
   const todaysPlan = currentRoadmapDayIndex >= 0 ? activeRoadmap?.plan?.[currentRoadmapDayIndex] : null;
 
+  // --- BRANDED LOADING SCREEN ---
   if (!isLoaded || isLoadingMain) return (
     <div className="flex h-screen items-center justify-center bg-slate-50 flex-col animate-in fade-in duration-500">
       <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-indigo-700 text-indigo-50 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-xl shadow-indigo-900/30 border border-indigo-400/30 transform -rotate-3 animate-pulse">
@@ -362,6 +394,7 @@ export default function StudentDashboard() {
     <>
       <ProductTour userId={user?.id} />
 
+      {/* --- PREMIUM GLASSMORPHISM TOAST --- */}
       {toast && (
         <div className={`fixed bottom-6 right-6 px-6 py-4 rounded-2xl shadow-2xl z-[9999] flex items-center gap-4 animate-in slide-in-from-bottom-5 backdrop-blur-xl border border-white/20 
           ${toast.type === 'success' ? 'bg-emerald-600/90 text-white' : 'bg-rose-600/90 text-white'}`}>
@@ -372,6 +405,7 @@ export default function StudentDashboard() {
         </div>
       )}
 
+      {/* --- PREMIUM DELETE CONFIRMATION MODAL --- */}
       {confirmDialog && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
            <div className="bg-white rounded-3xl p-8 max-w-sm w-[95%] shadow-2xl border border-slate-200 animate-in zoom-in-95 relative overflow-hidden">
@@ -387,6 +421,7 @@ export default function StudentDashboard() {
         </div>
       )}
 
+      {/* LOADING OVERLAY */}
       {isFetchingReport && (
         <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex flex-col items-center justify-center">
            <div className="relative w-20 h-20 mb-4">
@@ -398,10 +433,12 @@ export default function StudentDashboard() {
         </div>
       )}
 
-      {/* --- REPORT MODAL --- */}
+      {/* --- FULLY UPGRADED DEEP-DIVE REPORT MODAL --- */}
       {selectedResult && !isFetchingReport && (
         <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 md:p-6 animate-in fade-in duration-300">
           <div className="bg-slate-50 rounded-[2rem] shadow-2xl w-full max-w-6xl overflow-hidden flex flex-col h-full max-h-[95vh] border border-slate-700 animate-in zoom-in-95">
+            
+            {/* Modal Header */}
             <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 flex justify-between items-center shrink-0 border-b border-slate-800">
               <div className="flex items-center gap-4 text-white">
                 <div className="w-12 h-12 bg-indigo-500/20 rounded-xl flex items-center justify-center text-2xl border border-indigo-400/30 text-indigo-300"><i className="fas fa-chart-line"></i></div>
@@ -413,7 +450,10 @@ export default function StudentDashboard() {
               <button onClick={() => { setSelectedResult(null); setDiagnosticReport(null); setModalQuestions([]); }} className="w-10 h-10 bg-white/5 hover:bg-rose-500 text-slate-300 hover:text-white rounded-xl transition-all flex items-center justify-center shadow-sm border border-white/10 hover:border-rose-500"><i className="fas fa-times text-lg"></i></button>
             </div>
 
+            {/* Quick Stats Bar & Tabs */}
             <div className="bg-white p-4 md:p-6 flex flex-col md:flex-row justify-between items-center gap-4 border-b border-slate-200 shrink-0 shadow-sm z-10 relative">
+              
+              {/* Custom Tabs */}
               <div className="flex gap-2 bg-slate-100 p-1.5 rounded-xl w-full md:w-auto border border-slate-200">
                  <button onClick={() => setActiveModalTab('solutions')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg font-black text-xs uppercase tracking-widest transition-all ${activeModalTab === 'solutions' ? 'bg-white text-indigo-700 shadow-md border border-slate-200/50' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'}`}>
                    <i className="fas fa-list-check mr-2"></i>Solutions
@@ -422,6 +462,8 @@ export default function StudentDashboard() {
                    <i className="fas fa-brain mr-2"></i>AI Analysis
                  </button>
               </div>
+              
+              {/* Score Badges */}
               <div className="flex flex-wrap justify-center gap-3 w-full md:w-auto">
                  <div className="bg-slate-50 px-5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-3">
                    <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center"><i className="fas fa-bullseye"></i></div>
@@ -440,7 +482,10 @@ export default function StudentDashboard() {
               </div>
             </div>
 
+            {/* Modal Body Area */}
             <div className="p-6 md:p-8 overflow-y-auto flex-1 bg-slate-50/50 scroll-smooth">
+              
+              {/* --- TAB 1: SOLUTIONS --- */}
               {activeModalTab === 'solutions' && (
                 <div className="space-y-6 animate-in fade-in max-w-4xl mx-auto pb-10">
                   {fullExamReview.length === 0 ? (
@@ -451,10 +496,14 @@ export default function StudentDashboard() {
                   ) : fullExamReview.map((item, idx) => {
                     const isCorrect = item.isCorrect;
                     const isUnattempted = item.isUnattempted;
-                    const cardTheme = isCorrect ? 'border-emerald-200 shadow-emerald-900/5' : isUnattempted ? 'border-slate-300 shadow-slate-900/5' : 'border-rose-200 shadow-rose-900/5';
+                    
+                    const cardTheme = isCorrect 
+                        ? 'border-emerald-200 shadow-emerald-900/5' 
+                        : isUnattempted ? 'border-slate-300 shadow-slate-900/5' : 'border-rose-200 shadow-rose-900/5';
 
                     return (
                       <div key={idx} className={`bg-white border-2 rounded-2xl p-6 shadow-sm transition-all hover:shadow-md ${cardTheme}`}>
+                        
                         <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
                           <div className="flex items-center gap-3">
                             <span className="bg-slate-900 text-white w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black shadow-sm">Q{idx + 1}</span>
@@ -539,16 +588,21 @@ export default function StudentDashboard() {
                 </div>
               )}
 
+              {/* --- TAB 2: ADVANCED AI DIAGNOSTICS --- */}
               {activeModalTab === 'diagnostics' && (
                 <div className="animate-in fade-in max-w-6xl mx-auto pb-10">
+                  
                   {!diagnosticReport && !isAnalyzing && (
                     <div className="bg-white p-12 rounded-[2rem] border border-slate-200 shadow-sm text-center max-w-2xl mx-auto">
                       <div className="w-24 h-24 bg-gradient-to-br from-indigo-50 to-purple-50 text-indigo-500 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-inner border border-indigo-100/50"><i className="fas fa-brain"></i></div>
                       <h2 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Generate AI Performance Report</h2>
                       <p className="text-slate-500 text-sm mb-8 max-w-md mx-auto font-medium leading-relaxed">Gemini will scan every question you answered, analyze your logic, and pinpoint your exact strengths and vulnerabilities to generate a personalized study plan.</p>
-                      <button onClick={generateAIDiagnostics} className="bg-indigo-600 text-white px-8 py-4 rounded-xl font-black hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 text-base flex items-center justify-center gap-3 mx-auto hover:-translate-y-1">
-                        <i className="fas fa-wand-magic-sparkles text-lg"></i> Run Deep Analysis
-                      </button>
+                      
+                      <GuestBlocker role="student">
+                        <button onClick={generateAIDiagnostics} className="bg-indigo-600 text-white px-8 py-4 rounded-xl font-black hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 text-base flex items-center justify-center gap-3 mx-auto hover:-translate-y-1">
+                          <i className="fas fa-wand-magic-sparkles text-lg"></i> Run Deep Analysis
+                        </button>
+                      </GuestBlocker>
                     </div>
                   )}
 
@@ -691,12 +745,12 @@ export default function StudentDashboard() {
                 </h2>
                 <p className="text-indigo-200 text-xs md:text-sm font-medium max-w-sm">Enter the secure Room ID provided by your educator to instantly access your scheduled live exam.</p>
               </div>
-              <GuestBlocker role="student">
-                <form onSubmit={handleJoinRoom} className="flex gap-2 w-full md:w-auto relative z-10">
-                  <input type="text" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="e.g. 8xV9-2mB" className="w-full md:w-56 bg-white/10 border border-white/20 rounded-xl p-3 md:p-3.5 text-white placeholder-indigo-200 outline-none focus:bg-white/20 focus:border-white/40 transition font-mono text-sm font-bold shadow-inner" required />
-                  <button type="submit" disabled={isJoining} className="bg-white text-indigo-700 px-6 py-3 md:py-3.5 rounded-xl font-black hover:bg-indigo-50 transition shadow-lg disabled:opacity-70 flex items-center justify-center gap-2 shrink-0">{isJoining ? <i className="fas fa-spinner fa-spin"></i> : "Join"}</button>
-                </form>
-              </GuestBlocker>
+              <form onSubmit={handleJoinRoom} className="flex gap-2 w-full md:w-auto relative z-10">
+                <input type="text" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="e.g. 8xV9-2mB" className="w-full md:w-56 bg-white/10 border border-white/20 rounded-xl p-3 md:p-3.5 text-white placeholder-indigo-200 outline-none focus:bg-white/20 focus:border-white/40 transition font-mono text-sm font-bold shadow-inner" required />
+                <GuestBlocker role="student">
+                  <button type="submit" disabled={isJoining} className="bg-white text-indigo-700 px-6 py-3 md:py-3.5 rounded-xl font-black hover:bg-indigo-50 transition shadow-lg disabled:opacity-70 flex items-center justify-center gap-2 shrink-0 w-full">{isJoining ? <i className="fas fa-spinner fa-spin"></i> : "Join"}</button>
+                </GuestBlocker>
+              </form>
             </div>
 
             {/* IN-PROGRESS EXAMS WITH HOVER */}
@@ -708,17 +762,15 @@ export default function StudentDashboard() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {activeProgress.map((prog) => (
-                    <GuestBlocker role="student" key={prog.id}>
-                      <div onClick={() => router.push(`/student/exam/${prog.mockId}`)} className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm relative overflow-hidden group hover:-translate-y-1 hover:shadow-md hover:border-amber-400 transition-all duration-200 cursor-pointer">
-                        <div className="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
-                        <div className="flex justify-between items-start mb-2">
-                          <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider border border-amber-200"><i className="fas fa-pause-circle mr-1"></i> Resumable</span>
-                          <span className="text-[10px] font-black text-slate-500 font-mono bg-slate-100 px-1.5 py-0.5 rounded"><i className="fas fa-clock text-amber-500 mr-1"></i> {Math.floor(prog.timeLeft / 60)}m left</span>
-                        </div>
-                        <h3 className="font-bold text-slate-900 mt-1 mb-4 truncate text-sm">{prog.mockTitle || "Live Mock Exam"}</h3>
-                        <button className="w-full bg-slate-900 text-white py-2 rounded-lg text-xs font-black group-hover:bg-indigo-600 transition-colors shadow-sm flex items-center justify-center gap-1.5">Resume Exam <i className="fas fa-play text-[10px]"></i></button>
+                    <div key={prog.id} onClick={() => router.push(`/student/exam/${prog.mockId}`)} className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm relative overflow-hidden group hover:-translate-y-1 hover:shadow-md hover:border-amber-400 transition-all duration-200 cursor-pointer">
+                      <div className="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider border border-amber-200"><i className="fas fa-pause-circle mr-1"></i> Resumable</span>
+                        <span className="text-[10px] font-black text-slate-500 font-mono bg-slate-100 px-1.5 py-0.5 rounded"><i className="fas fa-clock text-amber-500 mr-1"></i> {Math.floor(prog.timeLeft / 60)}m left</span>
                       </div>
-                    </GuestBlocker>
+                      <h3 className="font-bold text-slate-900 mt-1 mb-4 truncate text-sm">{prog.mockTitle || "Live Mock Exam"}</h3>
+                      <button className="w-full bg-slate-900 text-white py-2 rounded-lg text-xs font-black group-hover:bg-indigo-600 transition-colors shadow-sm flex items-center justify-center gap-1.5">Resume Exam <i className="fas fa-play text-[10px]"></i></button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -751,20 +803,18 @@ export default function StudentDashboard() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {publicMocks.map((mock) => (
-                    <GuestBlocker role="student" key={mock.id}>
-                      <div onClick={() => router.push(`/student/exam/${mock.id}`)} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-indigo-400 hover:-translate-y-1 hover:shadow-md transition-all duration-200 flex flex-col h-full relative overflow-hidden group cursor-pointer w-full">
-                        {mock.isPYQ && <div className="absolute top-3 right-3 bg-rose-100 text-rose-800 text-[8px] uppercase font-black px-2 py-0.5 rounded shadow-sm border border-rose-200"><i className="fas fa-star text-rose-500 mr-1"></i> Official PYQ</div>}
-                        <div className="flex-1">
-                          <div className="flex justify-between items-start mb-3">
-                            <span className="bg-emerald-100 text-emerald-800 text-[8px] uppercase tracking-widest font-black px-2 py-0.5 rounded border border-emerald-200">Live</span>
-                            <span className="text-[10px] font-bold text-slate-500 mt-0.5 bg-slate-100 px-1.5 py-0.5 rounded"><i className="fas fa-clock mr-1 text-slate-400"></i> {mock.duration}m</span>
-                          </div>
-                          <h3 className="font-black text-slate-900 text-sm mb-1.5 leading-tight pr-10 group-hover:text-indigo-600 transition-colors">{mock.title}</h3>
-                          <div className="text-[10px] font-bold text-slate-500 mb-5 flex items-center gap-1.5"><div className="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center"><i className="fas fa-user text-slate-400 text-[8px]"></i></div> By {mock.educatorName || "Platform Educator"}</div>
+                    <div key={mock.id} onClick={() => router.push(`/student/exam/${mock.id}`)} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-indigo-400 hover:-translate-y-1 hover:shadow-md transition-all duration-200 flex flex-col h-full relative overflow-hidden group cursor-pointer w-full">
+                      {mock.isPYQ && <div className="absolute top-3 right-3 bg-rose-100 text-rose-800 text-[8px] uppercase font-black px-2 py-0.5 rounded shadow-sm border border-rose-200"><i className="fas fa-star text-rose-500 mr-1"></i> Official PYQ</div>}
+                      <div className="flex-1">
+                        <div className="flex justify-between items-start mb-3">
+                          <span className="bg-emerald-100 text-emerald-800 text-[8px] uppercase tracking-widest font-black px-2 py-0.5 rounded border border-emerald-200">Live</span>
+                          <span className="text-[10px] font-bold text-slate-500 mt-0.5 bg-slate-100 px-1.5 py-0.5 rounded"><i className="fas fa-clock mr-1 text-slate-400"></i> {mock.duration}m</span>
                         </div>
-                        <button className="w-full bg-indigo-50 text-indigo-700 border border-indigo-200 py-2 rounded-lg text-xs font-black group-hover:bg-indigo-600 group-hover:text-white transition-colors shadow-sm">Start Mock Test</button>
+                        <h3 className="font-black text-slate-900 text-sm mb-1.5 leading-tight pr-10 group-hover:text-indigo-600 transition-colors">{mock.title}</h3>
+                        <div className="text-[10px] font-bold text-slate-500 mb-5 flex items-center gap-1.5"><div className="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center"><i className="fas fa-user text-slate-400 text-[8px]"></i></div> By {mock.educatorName || "Platform Educator"}</div>
                       </div>
-                    </GuestBlocker>
+                      <button className="w-full bg-indigo-50 text-indigo-700 border border-indigo-200 py-2 rounded-lg text-xs font-black group-hover:bg-indigo-600 group-hover:text-white transition-colors shadow-sm">Start Mock Test</button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -815,11 +865,9 @@ export default function StudentDashboard() {
                                   </span>
                                 </td>
                                 <td className="p-4 text-right pr-5">
-                                  <GuestBlocker role="student">
-                                    <button onClick={() => openReportModal(result)} className="text-[10px] bg-white border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-black hover:bg-slate-50 hover:border-indigo-300 transition shadow-sm hover:text-indigo-600">
-                                      View Report
-                                    </button>
-                                  </GuestBlocker>
+                                  <button onClick={() => openReportModal(result)} className="text-[10px] bg-white border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-black hover:bg-slate-50 hover:border-indigo-300 transition shadow-sm hover:text-indigo-600">
+                                    View Report
+                                  </button>
                                 </td>
                               </tr>
                              )
@@ -831,15 +879,13 @@ export default function StudentDashboard() {
                     {/* LOAD MORE BUTTON */}
                     {hasMoreResults && (
                       <div className="p-3 border-t border-slate-100 bg-slate-50 flex justify-center">
-                        <GuestBlocker role="student">
-                          <button 
-                            onClick={loadMoreExams} 
-                            disabled={isLoadingMore}
-                            className="text-[10px] font-black text-indigo-600 bg-indigo-50/50 border border-indigo-100 px-4 py-2 rounded-lg hover:bg-indigo-100 transition shadow-sm disabled:opacity-50 flex items-center gap-2"
-                          >
-                            {isLoadingMore ? <><i className="fas fa-circle-notch fa-spin"></i> Loading...</> : "Show Next 5 Exams"}
-                          </button>
-                        </GuestBlocker>
+                        <button 
+                          onClick={loadMoreExams} 
+                          disabled={isLoadingMore}
+                          className="text-[10px] font-black text-indigo-600 bg-indigo-50/50 border border-indigo-100 px-4 py-2 rounded-lg hover:bg-indigo-100 transition shadow-sm disabled:opacity-50 flex items-center gap-2"
+                        >
+                          {isLoadingMore ? <><i className="fas fa-circle-notch fa-spin"></i> Loading...</> : "Show Next 5 Exams"}
+                        </button>
                       </div>
                     )}
                   </>
@@ -879,11 +925,9 @@ export default function StudentDashboard() {
                       <h4 className="text-[8px] font-black text-indigo-300 uppercase tracking-widest mb-1.5 flex items-center gap-1"><i className="far fa-calendar-check text-emerald-400"></i> Day {todaysPlan.day} Focus</h4>
                       <p className="font-bold text-white text-sm leading-tight mb-1">{todaysPlan.theme}</p>
                       <p className="text-[10px] text-slate-300 font-medium leading-snug mb-3">{todaysPlan.studyFocus}</p>
-                      <GuestBlocker role="student">
-                        <button onClick={() => router.push('/student/planner')} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white font-black py-1.5 rounded-lg transition shadow-sm text-[10px]">
-                          Open Planner
-                        </button>
-                      </GuestBlocker>
+                      <button onClick={() => router.push('/student/planner')} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white font-black py-1.5 rounded-lg transition shadow-sm text-[10px]">
+                        Open Planner
+                      </button>
                     </div>
                   ) : (
                     <div className="bg-emerald-500/20 border border-emerald-500/30 p-3 rounded-xl mb-4 relative z-10 text-center shadow-inner">
@@ -968,9 +1012,7 @@ export default function StudentDashboard() {
                   <div className="w-12 h-12 bg-indigo-100 text-indigo-500 rounded-full flex items-center justify-center text-xl mx-auto mb-3"><i className="fas fa-map-marked-alt"></i></div>
                   <h3 className="text-sm font-black text-indigo-900 mb-1">No Active Roadmap</h3>
                   <p className="text-[10px] font-medium text-indigo-700 mb-3">Generate an AI schedule to track your daily progress.</p>
-                  <GuestBlocker role="student">
-                    <button onClick={() => router.push('/student/planner')} className="w-full bg-indigo-600 text-white text-xs font-black py-2 rounded-lg hover:bg-indigo-700 transition shadow-sm">Create Plan</button>
-                  </GuestBlocker>
+                  <button onClick={() => router.push('/student/planner')} className="w-full bg-indigo-600 text-white text-xs font-black py-2 rounded-lg hover:bg-indigo-700 transition shadow-sm">Create Plan</button>
                 </div>
               )}
             </div>
@@ -988,9 +1030,7 @@ export default function StudentDashboard() {
                   <div className="text-2xl font-black text-emerald-600">{accuracy}%</div>
                 </div>
               </div>
-              <GuestBlocker role="student">
-                <button onClick={() => router.push('/student/analytics')} className="w-full text-[10px] font-black text-slate-600 bg-slate-50 py-2 rounded-lg hover:bg-slate-100 transition border border-slate-200">Full Analytics</button>
-              </GuestBlocker>
+              <button onClick={() => router.push('/student/analytics')} className="w-full text-[10px] font-black text-slate-600 bg-slate-50 py-2 rounded-lg hover:bg-slate-100 transition border border-slate-200">Full Analytics</button>
             </div>
 
           </div>

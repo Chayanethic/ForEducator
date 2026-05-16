@@ -45,14 +45,6 @@ export default function StudentLayout({ children }) {
         <i className={`fas fa-home w-4 ${pathname === '/student' ? 'text-indigo-600' : ''}`}></i> Dashboard
       </button>
       
-      <button onClick={() => navigateTo('/student/join-room')} className={`w-full text-left flex items-center gap-3 p-2.5 rounded-xl text-sm font-bold transition-colors ${pathname === '/student/join-room' ? 'bg-indigo-50 text-indigo-700 border-l-4 border-indigo-600 shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}>
-        <i className={`fas fa-door-open w-4 ${pathname === '/student/join-room' ? 'text-indigo-600' : ''}`}></i> Join Arena
-      </button>
-      
-      <button onClick={() => navigateTo('/student/analytics')} className={`w-full text-left flex items-center gap-3 p-2.5 rounded-xl text-sm font-bold transition-colors ${pathname === '/student/analytics' ? 'bg-indigo-50 text-indigo-700 border-l-4 border-indigo-600 shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}>
-        <i className={`fas fa-chart-line w-4 ${pathname === '/student/analytics' ? 'text-indigo-600' : ''}`}></i> My Scorecards
-      </button>
-      
       <div className="pt-3 pb-1">
         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-3">AI & Practice</span>
       </div>

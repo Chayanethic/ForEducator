@@ -129,6 +129,30 @@ export default async function LandingPage() {
                 </a>
               </div>
 
+              {/* ⚡ ADVANCED GUEST MODE HIGHLIGHT (DESKTOP ONLY) ⚡ */}
+              <div className="hidden lg:flex flex-col items-center mt-12 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-500">
+                 <div className="relative group">
+                    {/* Glowing Aura Effect */}
+                    <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-emerald-500 rounded-[2rem] blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
+                    <div className="relative bg-white/90 backdrop-blur-xl border border-slate-200 p-2.5 rounded-[1.5rem] shadow-xl flex items-center gap-4">
+                       <div className="flex items-center gap-2 pl-4 pr-2">
+                          <span className="relative flex h-2 w-2">
+                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                             <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                          </span>
+                          <span className="text-xs font-black text-slate-700 uppercase tracking-widest">No Sign-up Required</span>
+                       </div>
+                       <div className="w-px h-8 bg-slate-200"></div>
+                       <Link href="/student" className="flex items-center gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white px-5 py-2.5 rounded-xl text-sm font-bold transition shadow-sm border border-indigo-100 hover:border-indigo-600">
+                          <i className="fas fa-play"></i> Student Demo
+                       </Link>
+                       <Link href="/educator/dashboard" className="flex items-center gap-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white px-5 py-2.5 rounded-xl text-sm font-bold transition shadow-sm border border-emerald-100 hover:border-emerald-600">
+                          <i className="fas fa-play"></i> Educator Demo
+                       </Link>
+                    </div>
+                 </div>
+              </div>
+
               {/* ⚡ MOBILE & TABLET ONLY: App-Style Quick Start Dock ⚡ */}
               <div id="mobile-dock" className="flex lg:hidden flex-col items-center mt-4 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-300 w-full px-2 scroll-mt-24">
                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Tap your portal to begin</p>
@@ -159,13 +183,25 @@ export default async function LandingPage() {
 
                  </div>
                  
-                 {/* ⚡ MOBILE GUEST LINKS ⚡ */}
-                 <div className="flex items-center gap-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-4">
-                    <span>Explore as Guest:</span>
-                    <Link href="/student" className="text-indigo-500 hover:text-indigo-700 transition underline">Student</Link>
-                    <span>|</span>
-                    <Link href="/educator/dashboard" className="text-emerald-500 hover:text-emerald-700 transition underline">Educator</Link>
+                 {/* ⚡ ADVANCED MOBILE GUEST HIGHLIGHT ⚡ */}
+                 <div className="w-full max-w-md mx-auto mt-8 bg-slate-900 p-5 rounded-[2rem] shadow-2xl relative overflow-hidden border border-slate-800 animate-in fade-in duration-700 delay-500">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl"></div>
+                    <div className="relative z-10 flex flex-col items-center">
+                       <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                         <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span></span>
+                         Try Without Account
+                       </span>
+                       <div className="flex w-full gap-3">
+                          <Link href="/student" className="flex-1 bg-indigo-500/20 hover:bg-indigo-500/40 border border-indigo-500/30 text-indigo-300 text-xs font-bold py-3.5 rounded-xl text-center transition flex items-center justify-center gap-2 shadow-inner">
+                             <i className="fas fa-play text-[10px]"></i> Student
+                          </Link>
+                          <Link href="/educator/dashboard" className="flex-1 bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/30 text-emerald-300 text-xs font-bold py-3.5 rounded-xl text-center transition flex items-center justify-center gap-2 shadow-inner">
+                             <i className="fas fa-play text-[10px]"></i> Educator
+                          </Link>
+                       </div>
+                    </div>
                  </div>
+
               </div>
             </>
           ) : (
@@ -203,10 +239,10 @@ export default async function LandingPage() {
               <Link href="/sign-in?role=student" className="block w-full bg-slate-50 border border-slate-200 text-slate-700 hover:text-indigo-700 py-3 rounded-xl font-black hover:bg-indigo-50 hover:border-indigo-200 transition text-center">
                 Student Login
               </Link>
-              {/* ⚡ DESKTOP GUEST LINK ⚡ */}
-              <div className="mt-4">
-                <Link href="/student" className="text-xs font-bold text-slate-400 hover:text-indigo-600 transition inline-flex items-center gap-1 group-hover:text-indigo-500">
-                   Explore as Guest <i className="fas fa-arrow-right text-[10px]"></i>
+              {/* ⚡ ADVANCED DESKTOP GUEST LINK ⚡ */}
+              <div className="mt-4 w-full">
+                <Link href="/student" className="flex items-center justify-center gap-2 w-full bg-indigo-50/50 text-indigo-600 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider hover:bg-indigo-600 hover:text-white transition-all shadow-sm border border-indigo-100 hover:border-indigo-600">
+                   <i className="fas fa-play"></i> Try Guest Demo
                 </Link>
               </div>
             </div>
@@ -223,10 +259,10 @@ export default async function LandingPage() {
               <Link href="/sign-in?role=educator" className="block w-full bg-slate-50 border border-slate-200 text-slate-700 hover:text-emerald-700 py-3 rounded-xl font-black hover:bg-emerald-50 hover:border-emerald-200 transition text-center">
                 Educator Login
               </Link>
-              {/* ⚡ DESKTOP GUEST LINK ⚡ */}
-              <div className="mt-4">
-                <Link href="/educator/dashboard" className="text-xs font-bold text-slate-400 hover:text-emerald-600 transition inline-flex items-center gap-1 group-hover:text-emerald-500">
-                   Explore as Guest <i className="fas fa-arrow-right text-[10px]"></i>
+              {/* ⚡ ADVANCED DESKTOP GUEST LINK ⚡ */}
+              <div className="mt-4 w-full">
+                <Link href="/educator/dashboard" className="flex items-center justify-center gap-2 w-full bg-emerald-50/50 text-emerald-600 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider hover:bg-emerald-500 hover:text-white transition-all shadow-sm border border-emerald-100 hover:border-emerald-500">
+                   <i className="fas fa-play"></i> Try Guest Demo
                 </Link>
               </div>
             </div>
@@ -245,7 +281,7 @@ export default async function LandingPage() {
                 Enterprise Login
               </Link>
               {/* Invisible spacer to keep cards exactly the same height */}
-              <div className="mt-4 opacity-0 pointer-events-none text-xs">Spacer</div>
+              <div className="mt-4 opacity-0 pointer-events-none text-[10px] py-3 uppercase tracking-wider font-black">Spacer</div>
             </div>
 
           </div>

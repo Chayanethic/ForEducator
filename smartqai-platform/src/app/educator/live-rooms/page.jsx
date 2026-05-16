@@ -1,20 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useUser, useClerk } from "@clerk/nextjs";
+import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { collection, query, where, getDocs, doc, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
+// ⚡ IMPORT GUEST BLOCKER ⚡
+import GuestBlocker from "@/components/GuestBlocker";
+
 export default function LiveRoomsHub() {
-  const { user, isLoaded, isSignedIn } = useUser();
-  const { signOut } = useClerk();
+  const { user, isLoaded } = useUser();
   const router = useRouter();
   
   const [myRooms, setMyRooms] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [toast, setToast] = useState({ show: false, message: "", type: "success" });
   const [confirmDialog, setConfirmDialog] = useState({ show: false, mockId: null, title: "" });
@@ -26,7 +26,11 @@ export default function LiveRoomsHub() {
   };
 
   const fetchMyRooms = async () => {
-    if (!user) return;
+    // ⚡ If Guest, stop loading and show empty state ⚡
+    if (!user) {
+      setIsLoading(false);
+      return;
+    }
     
     try {
       const mocksRef = collection(db, "mocks");
@@ -49,8 +53,8 @@ export default function LiveRoomsHub() {
   };
 
   useEffect(() => {
-    if (isLoaded && isSignedIn) fetchMyRooms();
-  }, [user, isLoaded, isSignedIn]);
+    if (isLoaded) fetchMyRooms();
+  }, [user, isLoaded]);
 
   const handleDeleteClick = (mockId, title) => {
     setConfirmDialog({ show: true, mockId, title });
@@ -95,10 +99,9 @@ export default function LiveRoomsHub() {
     </div>
   );
 
-  if (!isSignedIn) return <div className="p-10 text-center font-bold text-slate-500">Please log in to view your live rooms.</div>;
-
   return (
-    <div className="flex h-screen bg-slate-50 font-sans relative overflow-hidden">
+    // ⚡ Removed outer layout wrappers to fit perfectly into Educator Layout ⚡
+    <div className="flex flex-col relative w-full h-full bg-slate-50 font-sans overflow-hidden">
       
       {/* PREMIUM UPGRADE: GLASSMORPHISM TOAST NOTIFICATION */}
       {toast.show && (
@@ -144,155 +147,104 @@ export default function LiveRoomsHub() {
         </div>
       )}
 
-      {/* MOBILE MENU OVERLAY */}
-      {isMobileMenuOpen && ( <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)} /> )}
-
-      {/* UNIFIED INDIGO SIDEBAR */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-indigo-950 text-white flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
-        <div className="flex items-center justify-between p-5 border-b border-indigo-900">
-          <Link href="/onboarding?switch=true" className="text-xl font-black flex items-center gap-2 hover:text-emerald-400 transition cursor-pointer tracking-tight">
-            <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
-          </Link>
-          <button className="md:hidden text-indigo-300 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}><i className="fas fa-times text-lg"></i></button>
-        </div>
-        <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
-            <button onClick={() => router.push('/educator/dashboard')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
-                <i className="fas fa-home w-4"></i> Dashboard
-            </button>
-            <button onClick={() => router.push('/educator/create-mock')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
-                <i className="fas fa-file-pdf w-4"></i> Exam Studio
-            </button>
-            <button onClick={() => router.push('/educator/live-rooms')} className="w-full flex items-center gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-emerald-400 shadow-inner">
-                <i className="fas fa-door-open w-4 text-emerald-400"></i> Live Rooms
-            </button>
-            <button onClick={() => router.push('/educator/exam-generator')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
-                <i className="fas fa-brain w-4 text-fuchsia-400 group-hover:animate-pulse"></i> AI Exam Generator
-                <span className="ml-auto bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">New</span>
-            </button>
-            <button onClick={() => router.push('/educator/quiz-poll')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
-                <i className="fas fa-bolt w-4"></i> Live Quiz Poll
-            </button>
-        </nav>
-        
-        <div className="p-3 border-t border-indigo-900 bg-indigo-900/30 space-y-1.5">
-            <div className="flex items-center gap-2.5 p-2.5 bg-indigo-950/50 rounded-xl border border-indigo-800/50 shadow-inner">
-                <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Educator"} alt="Avatar" className="w-7 h-7 rounded-full border border-indigo-700" />
-                <div className="text-xs font-bold truncate flex-1 text-indigo-100">{user?.fullName || "Account"}</div>
-            </div>
-            <button onClick={() => router.push('/onboarding?switch=true')} className="w-full flex items-center justify-center gap-2 text-indigo-300 hover:bg-indigo-800 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-transparent hover:border-indigo-700 shadow-sm">
-                <i className="fas fa-exchange-alt"></i> Switch Role
-            </button>
-            <button onClick={() => signOut({ redirectUrl: '/' })} className="w-full flex items-center justify-center gap-2 text-rose-400 hover:bg-rose-600 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-rose-900/50 hover:border-rose-500 bg-rose-950/20 shadow-sm">
-                <i className="fas fa-sign-out-alt"></i> Log Out
-            </button>
-        </div>
-      </aside>
-
       {/* MAIN CONTENT */}
-      <main className="flex-1 flex flex-col overflow-y-auto w-full">
-        
-        {/* --- UPGRADED HEADER WITH HIGHLIGHTED BACK BUTTON --- */}
-        <header className="bg-white border-b border-slate-200 h-auto md:h-16 py-3 px-4 md:px-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-0 z-20 shrink-0 shadow-sm sticky top-0">
-          <div className="flex items-center gap-3 w-full md:w-auto">
-             <button className="md:hidden text-slate-600 shrink-0" onClick={() => setIsMobileMenuOpen(true)}><i className="fas fa-bars text-xl"></i></button>
-             
-             {/* HIGH-VISIBILITY BACK BUTTON */}
-             <button onClick={() => router.push('/educator/dashboard')} className="shrink-0 bg-indigo-50 border border-indigo-100 text-indigo-600 hover:text-white hover:bg-indigo-600 hover:shadow-md transition-all flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold" title="Back to Dashboard">
-               <i className="fas fa-arrow-left"></i> <span className="hidden sm:block">Dashboard</span>
-             </button>
-             
-             <h1 className="text-xl md:text-2xl font-black text-slate-900 ml-2">Live Rooms</h1>
-          </div>
-          
-          <button 
-            onClick={() => router.push('/educator/create-mock')}
-            className="w-full md:w-auto bg-emerald-600 text-white px-5 py-2 md:py-2.5 rounded-lg text-sm font-bold shadow-sm hover:bg-emerald-700 hover:shadow-md transition-all flex items-center justify-center gap-2 hover:-translate-y-0.5"
-          >
-            <i className="fas fa-plus"></i> Create New Mock
-          </button>
-        </header>
-
-        <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full">
-          
-          {myRooms.length === 0 ? (
-            <div className="mt-10 flex flex-col items-center justify-center animate-in fade-in zoom-in duration-500 px-4 text-center">
-               <div className="w-24 h-24 bg-indigo-50 text-indigo-300 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-inner border border-indigo-100/50 transform -rotate-3"><i className="fas fa-door-open"></i></div>
-               <h2 className="text-2xl md:text-3xl font-black text-slate-800 mb-3 tracking-tight">No Rooms Created Yet</h2>
-               <p className="text-sm font-medium text-slate-500 max-w-md mb-8 leading-relaxed">Head over to the Exam Studio to extract a PDF with AI or build your first custom mock exam.</p>
-               
-               <button onClick={() => router.push('/educator/create-mock')} className="bg-indigo-600 text-white px-8 py-3.5 rounded-xl font-black hover:bg-indigo-700 hover:-translate-y-1 transition-all text-sm md:text-base shadow-lg shadow-indigo-600/30 flex items-center gap-2 w-full sm:w-auto justify-center">
-                 Go to Exam Studio <i className="fas fa-arrow-right ml-1"></i>
-               </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 lg:gap-6">
-              {myRooms.map((room) => (
-                <div key={room.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg hover:border-indigo-300 hover:-translate-y-1 transition-all flex flex-col overflow-hidden group">
-                  
-                  {/* Card Header & Content */}
-                  <div className="p-5 md:p-6 flex-1 flex flex-col relative">
-                    
-                    {/* Delete Button (Absolute top right, shows on hover) */}
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); handleDeleteClick(room.id, room.title); }}
-                      className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-slate-300 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 rounded-lg transition-all opacity-100 md:opacity-0 group-hover:opacity-100 shadow-sm"
-                      title="Delete Exam"
-                    >
-                      <i className="fas fa-trash-alt text-sm"></i>
-                    </button>
-
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className={`text-[9px] uppercase tracking-widest font-black px-2.5 py-1 rounded-md shadow-sm ${room.visibility === 'public' ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'bg-purple-50 text-purple-600 border border-purple-200'}`}>
-                        {room.visibility === 'public' ? <><i className="fas fa-globe-americas mr-1"></i> Public</> : <><i className="fas fa-lock mr-1"></i> Private</>}
-                      </span>
-                      <span className="text-[10px] text-slate-500 font-bold bg-slate-100 px-2 py-1 rounded border border-slate-200">
-                        <i className="far fa-calendar-alt mr-1"></i> {room.createdAtDate.toLocaleDateString()}
-                      </span>
-                    </div>
-                    
-                    <h3 className="font-black text-slate-900 text-lg md:text-xl leading-tight mb-4 pr-8 line-clamp-2">{room.title}</h3>
-                    
-                    <div className="mt-auto flex flex-wrap items-center gap-2 text-xs text-slate-600 font-bold bg-slate-50 p-3 rounded-xl border border-slate-100">
-                      <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm"><i className="fas fa-layer-group text-indigo-500"></i> {room.examCategory}</div>
-                      <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm"><i className="fas fa-clock text-amber-500"></i> {room.duration}m</div>
-                      <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm truncate max-w-full"><i className="fas fa-eye text-emerald-500"></i> {room.availability === 'permanent' ? 'Always' : room.availability}</div>
-                    </div>
-                  </div>
-
-                  {/* Room ID Bar (For Private Rooms) */}
-                  {room.visibility === 'private' && (
-                    <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white px-5 py-4 border-t border-slate-800 flex justify-between items-center relative overflow-hidden">
-                      <div className="absolute -right-4 -top-4 w-16 h-16 bg-indigo-500/20 rounded-full blur-xl pointer-events-none"></div>
-                      <div className="relative z-10">
-                        <span className="text-[9px] text-indigo-300 font-black uppercase tracking-widest block mb-0.5">Room ID</span>
-                        <span className="font-mono text-lg md:text-xl font-black tracking-wider text-white">{room.id}</span>
-                      </div>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); handleCopyCode(room.id); }}
-                        className="relative z-10 text-slate-300 hover:text-emerald-400 bg-white/10 hover:bg-white/20 border border-white/10 w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-sm hover:scale-105"
-                        title="Copy Room ID"
-                      >
-                        <i className="fas fa-copy"></i>
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Card Footer Action */}
-                  <div className="p-3 bg-slate-100 border-t border-slate-200">
-                    <button 
-                      onClick={() => router.push(`/educator/live-rooms/${room.id}`)}
-                      className="w-full bg-white border border-slate-300 text-indigo-700 py-3 rounded-xl text-sm font-black hover:bg-indigo-50 hover:border-indigo-300 transition-colors shadow-sm flex items-center justify-center gap-2 group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600"
-                    >
-                      <i className="fas fa-chart-line"></i> View Leaderboard
-                    </button>
-                  </div>
-
-                </div>
-              ))}
-            </div>
-          )}
+      <header className="bg-white border-b border-slate-200 h-auto md:h-16 py-3 px-4 md:px-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-0 z-20 shrink-0 shadow-sm sticky top-0">
+        <div className="flex items-center gap-3 w-full md:w-auto">
+            {/* HIGH-VISIBILITY BACK BUTTON */}
+            <button onClick={() => router.push('/educator/dashboard')} className="shrink-0 bg-indigo-50 border border-indigo-100 text-indigo-600 hover:text-white hover:bg-indigo-600 hover:shadow-md transition-all flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold" title="Back to Dashboard">
+              <i className="fas fa-arrow-left"></i> <span className="hidden sm:block">Dashboard</span>
+            </button>
+            
+            <h1 className="text-xl md:text-2xl font-black text-slate-900 ml-2">Live Rooms</h1>
         </div>
-      </main>
+        
+        <button 
+          onClick={() => router.push('/educator/create-mock')}
+          className="w-full md:w-auto bg-emerald-600 text-white px-5 py-2 md:py-2.5 rounded-lg text-sm font-bold shadow-sm hover:bg-emerald-700 hover:shadow-md transition-all flex items-center justify-center gap-2 hover:-translate-y-0.5"
+        >
+          <i className="fas fa-plus"></i> Create New Mock
+        </button>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full">
+        {myRooms.length === 0 ? (
+          <div className="mt-10 flex flex-col items-center justify-center animate-in fade-in zoom-in duration-500 px-4 text-center">
+             <div className="w-24 h-24 bg-indigo-50 text-indigo-300 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-inner border border-indigo-100/50 transform -rotate-3"><i className="fas fa-door-open"></i></div>
+             <h2 className="text-2xl md:text-3xl font-black text-slate-800 mb-3 tracking-tight">No Rooms Created Yet</h2>
+             <p className="text-sm font-medium text-slate-500 max-w-md mb-8 leading-relaxed">Head over to the Exam Studio to extract a PDF with AI or build your first custom mock exam.</p>
+             
+             <button onClick={() => router.push('/educator/create-mock')} className="bg-indigo-600 text-white px-8 py-3.5 rounded-xl font-black hover:bg-indigo-700 hover:-translate-y-1 transition-all text-sm md:text-base shadow-lg shadow-indigo-600/30 flex items-center gap-2 w-full sm:w-auto justify-center">
+               Go to Exam Studio <i className="fas fa-arrow-right ml-1"></i>
+             </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 lg:gap-6">
+            {myRooms.map((room) => (
+              <div key={room.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg hover:border-indigo-300 hover:-translate-y-1 transition-all flex flex-col overflow-hidden group">
+                
+                {/* Card Header & Content */}
+                <div className="p-5 md:p-6 flex-1 flex flex-col relative">
+                  
+                  {/* Delete Button (Absolute top right, shows on hover) */}
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleDeleteClick(room.id, room.title); }}
+                    className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-slate-300 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 rounded-lg transition-all opacity-100 md:opacity-0 group-hover:opacity-100 shadow-sm"
+                    title="Delete Exam"
+                  >
+                    <i className="fas fa-trash-alt text-sm"></i>
+                  </button>
+
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className={`text-[9px] uppercase tracking-widest font-black px-2.5 py-1 rounded-md shadow-sm ${room.visibility === 'public' ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'bg-purple-50 text-purple-600 border border-purple-200'}`}>
+                      {room.visibility === 'public' ? <><i className="fas fa-globe-americas mr-1"></i> Public</> : <><i className="fas fa-lock mr-1"></i> Private</>}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-bold bg-slate-100 px-2 py-1 rounded border border-slate-200">
+                      <i className="far fa-calendar-alt mr-1"></i> {room.createdAtDate.toLocaleDateString()}
+                    </span>
+                  </div>
+                  
+                  <h3 className="font-black text-slate-900 text-lg md:text-xl leading-tight mb-4 pr-8 line-clamp-2">{room.title}</h3>
+                  
+                  <div className="mt-auto flex flex-wrap items-center gap-2 text-xs text-slate-600 font-bold bg-slate-50 p-3 rounded-xl border border-slate-100">
+                    <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm"><i className="fas fa-layer-group text-indigo-500"></i> {room.examCategory}</div>
+                    <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm"><i className="fas fa-clock text-amber-500"></i> {room.duration}m</div>
+                    <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm truncate max-w-full"><i className="fas fa-eye text-emerald-500"></i> {room.availability === 'permanent' ? 'Always' : room.availability}</div>
+                  </div>
+                </div>
+
+                {/* Room ID Bar (For Private Rooms) */}
+                {room.visibility === 'private' && (
+                  <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white px-5 py-4 border-t border-slate-800 flex justify-between items-center relative overflow-hidden">
+                    <div className="absolute -right-4 -top-4 w-16 h-16 bg-indigo-500/20 rounded-full blur-xl pointer-events-none"></div>
+                    <div className="relative z-10">
+                      <span className="text-[9px] text-indigo-300 font-black uppercase tracking-widest block mb-0.5">Room ID</span>
+                      <span className="font-mono text-lg md:text-xl font-black tracking-wider text-white">{room.id}</span>
+                    </div>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleCopyCode(room.id); }}
+                      className="relative z-10 text-slate-300 hover:text-emerald-400 bg-white/10 hover:bg-white/20 border border-white/10 w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-sm hover:scale-105"
+                      title="Copy Room ID"
+                    >
+                      <i className="fas fa-copy"></i>
+                    </button>
+                  </div>
+                )}
+
+                {/* Card Footer Action */}
+                <div className="p-3 bg-slate-100 border-t border-slate-200">
+                  <button 
+                    onClick={() => router.push(`/educator/live-rooms/${room.id}`)}
+                    className="w-full bg-white border border-slate-300 text-indigo-700 py-3 rounded-xl text-sm font-black hover:bg-indigo-50 hover:border-indigo-300 transition-colors shadow-sm flex items-center justify-center gap-2 group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600"
+                  >
+                    <i className="fas fa-chart-line"></i> View Leaderboard
+                  </button>
+                </div>
+
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

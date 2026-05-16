@@ -10,6 +10,9 @@ import { db } from "@/lib/firebase";
 import 'katex/dist/katex.min.css';
 import Latex from 'react-latex-next';
 
+// ⚡ IMPORT GUEST BLOCKER ⚡
+import GuestBlocker from "@/components/GuestBlocker";
+
 export default function EducatorMockDetails({ params }) {
   const unwrappedParams = use(params);
   const mockId = unwrappedParams.id;
@@ -30,20 +33,39 @@ export default function EducatorMockDetails({ params }) {
   // Fetch Exam Details & Questions
   useEffect(() => {
     const fetchExamDetails = async () => {
+      // ⚡ Guest Mode Fallback ⚡
+      if (!user) {
+         setExam({ id: mockId, title: "Demo Database Exam", duration: 60, category: "UPSC", isPublic: true, status: "published" });
+         setQuestions([
+            { id: "1", text: "Who was the first Prime Minister of India?", type: "MCQ", options: [{id:"A", text:"Gandhi"}, {id:"B", text:"Nehru"}], correctAnswer: "B", marks: 2, negativeMarks: 0.66 }
+         ]);
+         setIsLoading(false);
+         return;
+      }
+
       if (!mockId) return;
       try {
-        // 1. Fetch Exam Meta
         const examRef = doc(db, "mock_exams", mockId);
         const examSnap = await getDoc(examRef);
         
         if (!examSnap.exists()) {
+          // Try regular mocks collection if not in mock_exams
+          const altRef = doc(db, "mocks", mockId);
+          const altSnap = await getDoc(altRef);
+          if (altSnap.exists()) {
+             setExam({ id: altSnap.id, ...altSnap.data() });
+             const qRef = collection(db, "mocks", mockId, "questions");
+             const qSnap = await getDocs(qRef);
+             let fetchedQuestions = qSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+             setQuestions(fetchedQuestions);
+             return;
+          }
           console.error("Exam not found");
           setIsLoading(false);
           return;
         }
         setExam({ id: examSnap.id, ...examSnap.data() });
 
-        // 2. Fetch Exam Questions
         const qRef = collection(db, "mock_exams", mockId, "questions");
         const qSnap = await getDocs(qRef);
         
@@ -58,13 +80,16 @@ export default function EducatorMockDetails({ params }) {
       }
     };
 
-    fetchExamDetails();
-  }, [mockId]);
+    if (isLoaded) fetchExamDetails();
+  }, [mockId, user, isLoaded]);
 
   // Fetch Student Submissions
   useEffect(() => {
     const fetchSubmissions = async () => {
-      if (!mockId) return;
+      if (!mockId || !user) {
+         setIsSubmissionsLoading(false);
+         return;
+      }
       try {
         const resultsRef = collection(db, "results");
         const q = query(resultsRef, where("mockId", "==", mockId));
@@ -87,8 +112,8 @@ export default function EducatorMockDetails({ params }) {
       }
     };
 
-    fetchSubmissions();
-  }, [mockId]);
+    if (isLoaded) fetchSubmissions();
+  }, [mockId, user, isLoaded]);
 
   const copyToClipboard = () => {
     if (exam?.id) {
@@ -118,39 +143,27 @@ export default function EducatorMockDetails({ params }) {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-[#FAFAFA] font-sans selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden relative">
+    // ⚡ Removed outer layout wrappers to fit perfectly into Educator Layout ⚡
+    <div className="flex flex-col h-full bg-[#FAFAFA] font-sans overflow-hidden relative">
       
       {/* Subtle Background */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[500px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-50/40 via-[#FAFAFA] to-[#FAFAFA] pointer-events-none"></div>
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[500px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-50/40 via-[#FAFAFA] to-[#FAFAFA] pointer-events-none z-0"></div>
 
-      {/* Header Area (Full Width, No Sidebar) */}
-      <header className="relative z-20 px-6 md:px-10 py-5 flex justify-between items-center w-full border-b border-slate-200 bg-white/80 backdrop-blur-md shadow-sm">
+      {/* Header Area */}
+      <header className="relative z-20 px-4 md:px-8 py-4 flex justify-between items-center w-full border-b border-slate-200 bg-white/80 backdrop-blur-md shadow-sm shrink-0">
         <div className="flex items-center gap-6">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white font-bold shadow-md shadow-indigo-600/20">
-            O
-          </div>
-          <div className="flex flex-col">
-            <h1 className="text-xl font-black text-slate-900 tracking-tight">OZONE Educator</h1>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Portal Management</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-4">
-           <button onClick={() => router.push('/educator/dashboard')} className="text-sm font-bold text-slate-500 hover:text-indigo-600 transition flex items-center gap-2">
-             <i className="fas fa-home"></i> Dashboard
-           </button>
+          <button 
+            onClick={() => router.push('/educator/dashboard')} 
+            className="flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-indigo-600 bg-slate-50 border border-slate-200 hover:border-indigo-200 px-4 py-2 rounded-lg shadow-sm transition-all"
+          >
+            <i className="fas fa-arrow-left"></i> Dashboard
+          </button>
         </div>
       </header>
 
       {/* Scrollable Main Content */}
       <main className="flex-1 overflow-y-auto p-4 md:p-8 relative z-10">
-        <div className="max-w-6xl mx-auto w-full">
-          
-          <button 
-            onClick={() => router.push('/educator/exam-generator')} 
-            className="mb-8 flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-indigo-600 bg-white border border-slate-200 hover:border-indigo-200 px-5 py-2.5 rounded-full shadow-sm transition-all w-fit"
-          >
-            <i className="fas fa-arrow-left"></i> Back to Exam Studio
-          </button>
+        <div className="max-w-6xl mx-auto w-full pb-20">
 
           {/* TOP HEADER CARD */}
           <div className="bg-white rounded-3xl p-8 md:p-10 shadow-xl shadow-indigo-900/5 border border-slate-100 mb-10 relative overflow-hidden">
@@ -163,7 +176,7 @@ export default function EducatorMockDetails({ params }) {
                     {exam.isPublic ? 'Public Exam' : 'Private Exam'}
                   </span>
                   <span className="bg-slate-100 text-slate-600 border border-slate-200 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest">
-                    {exam.category}
+                    {exam.category || exam.examCategory}
                   </span>
                   <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${exam.status === 'draft' ? 'bg-slate-100 text-slate-500 border border-slate-200' : 'bg-indigo-50 text-indigo-600 border border-indigo-200'}`}>
                     {exam.status === 'draft' ? 'Draft' : 'Published'}
@@ -171,7 +184,7 @@ export default function EducatorMockDetails({ params }) {
                 </div>
                 <h2 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight mb-2">{exam.title || `${exam.topic} Assessment`}</h2>
                 <p className="text-slate-500 font-bold text-sm flex items-center gap-2">
-                  <i className="fas fa-bullseye text-indigo-400"></i> Core Concept: {exam.topic}
+                  <i className="fas fa-bullseye text-indigo-400"></i> Core Concept: {exam.topic || exam.title}
                 </p>
               </div>
 
@@ -212,7 +225,7 @@ export default function EducatorMockDetails({ params }) {
                 <div className="w-12 h-12 rounded-full bg-violet-50 text-violet-600 flex items-center justify-center text-xl shadow-sm border border-violet-100"><i className="fas fa-layer-group"></i></div>
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Difficulty</p>
-                  <p className="text-base font-black text-slate-800">{exam.difficulty}</p>
+                  <p className="text-base font-black text-slate-800">{exam.difficulty || 'Mixed'}</p>
                 </div>
               </div>
               <div className="flex items-center gap-4">

@@ -5,14 +5,16 @@ const isPublicRoute = createRouteMatcher([
   '/', 
   '/sign-in(.*)', 
   '/sign-up(.*)', 
-  '/embed/exam(.*)', // <-- Allows students to take the exam without logging in!
+  '/embed/exam(.*)', // Allows students to take embedded exams without logging in
+  '/student(.*)',    // ⚡ NEW: Allows guests to explore the student panel
+  '/educator(.*)',   // ⚡ NEW: Allows guests to explore the educator panel
   '/api(.*)'         // Allows your APIs to work securely
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
   // 2. If the user is NOT on a public route, force them to log in
   if (!isPublicRoute(req)) {
-    await auth.protect(); // <-- FIXED: Added 'await' and removed the '()'
+    await auth.protect(); 
   }
 });
 

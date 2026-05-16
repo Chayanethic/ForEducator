@@ -1,18 +1,18 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useUser, useClerk } from "@clerk/nextjs";
+import { useUser } from "@clerk/nextjs";
 import { collection, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 
 // --- MATH RENDERING IMPORTS ---
 import 'katex/dist/katex.min.css';
 import Latex from 'react-latex-next';
 
-// --- IMPORT THE EDUCATOR TOUR ---
+// --- COMPONENTS ---
 import EducatorTour from "@/components/EducatorTour";
+import GuestBlocker from "@/components/GuestBlocker";
 
 // --- EXTREME COMPRESSION ENGINE ---
 const compressImage = async (imageFile, maxWidth = 800, quality = 0.6) => {
@@ -111,7 +111,6 @@ const ImageCropperModal = ({ src, onCrop, onCancel }) => {
 
 export default function CreateMockPage() {
   const { user, isLoaded } = useUser();
-  const { signOut } = useClerk();
   const router = useRouter();
   
   const [file, setFile] = useState(null);
@@ -133,7 +132,6 @@ export default function CreateMockPage() {
   
   const [uploadingCount, setUploadingCount] = useState(0);
   const [listeningField, setListeningField] = useState(null);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [cropperState, setCropperState] = useState({ show: false, src: null, file: null, targetQIndex: null, targetType: null, targetOptIndex: null });
   const [confirmDialog, setConfirmDialog] = useState(null);
@@ -175,8 +173,9 @@ export default function CreateMockPage() {
   };
 
   useEffect(() => {
-    if (isLoaded && user) {
-      const savedDraft = localStorage.getItem(`ozone_mock_draft_${user.id}`);
+    if (isLoaded) {
+      const draftKey = `ozone_mock_draft_${user?.id || 'guest'}`;
+      const savedDraft = localStorage.getItem(draftKey);
       if (savedDraft) {
         try {
           const parsed = JSON.parse(savedDraft);
@@ -217,12 +216,12 @@ export default function CreateMockPage() {
       examTitle, examCategory, duration, allowCalculator, visibility, availability, questions,
       blockMobile, blockMultiple, blockTabSwitch, enableWatermark, spotlightMode
     };
-    localStorage.setItem(`ozone_mock_draft_${user.id}`, JSON.stringify(draftData));
+    localStorage.setItem(`ozone_mock_draft_${user?.id || 'guest'}`, JSON.stringify(draftData));
     router.push('/educator/dashboard');
   };
 
   const discardDraftAndLeave = () => {
-    localStorage.removeItem(`ozone_mock_draft_${user.id}`);
+    localStorage.removeItem(`ozone_mock_draft_${user?.id || 'guest'}`);
     setQuestions([]);
     router.push('/educator/dashboard');
   };
@@ -239,7 +238,6 @@ export default function CreateMockPage() {
     }
   };
 
-  // ⚡ --- BULLETPROOF DYNAMIC CSV PARSER --- ⚡
   const parseCSV = (text) => {
     const result = [];
     let row = [];
@@ -278,9 +276,7 @@ export default function CreateMockPage() {
         const csvData = parseCSV(event.target.result);
         const parsedQs = [];
 
-        // 1. Identify the real header row (Ignore Instructions)
         let ansIdx = 6; let marksIdx = 7; let negMarksIdx = 8; let expIdx = 9;
-        
         const headerRow = csvData.find(row => row.some(cell => typeof cell === 'string' && cell.toLowerCase().includes('question text')));
         
         if (headerRow) {
@@ -289,20 +285,17 @@ export default function CreateMockPage() {
             negMarksIdx = headerRow.findIndex(cell => typeof cell === 'string' && cell.toLowerCase().includes('negative marks'));
             expIdx = headerRow.findIndex(cell => typeof cell === 'string' && cell.toLowerCase().includes('explanation'));
             
-            // Failsafes if columns are renamed
             if (ansIdx === -1) ansIdx = 6;
             if (marksIdx === -1) marksIdx = ansIdx + 1;
             if (negMarksIdx === -1) negMarksIdx = ansIdx + 2;
             if (expIdx === -1) expIdx = ansIdx + 3;
         }
 
-        // 2. Loop through rows and extract
-        const maxPossibleOptions = Math.max(4, ansIdx - 2); // Count all columns between Question and Answer
+        const maxPossibleOptions = Math.max(4, ansIdx - 2); 
 
         for (let i = 0; i < csvData.length; i++) {
           let row = csvData[i];
           
-          // Skip invalid, empty, or instruction rows
           if (row.length < 2 || !row[1] || row[1].trim() === "") continue; 
           if (row[0].toUpperCase().includes("INSTRUCTION") || row[1].toLowerCase().includes("question text")) continue;
 
@@ -322,24 +315,21 @@ export default function CreateMockPage() {
             negMarks = parseFloat(row[negMarksIdx]) || 0;
             explanation = row[expIdx] || '';
           } else {
-            // Find how many actual options they filled out
             let lastValidOpt = -1;
             for (let j = 0; j < maxPossibleOptions; j++) {
                if ((row[2 + j] || '').trim() !== '') lastValidOpt = j;
             }
             
-            // Generate at least 4 options visually, or more if they provided them
             const optionsToCreate = Math.max(4, lastValidOpt + 1);
 
             for (let j = 0; j < optionsToCreate; j++) {
               parsedOptions.push({
-                id: String.fromCharCode(65 + j), // A, B, C, D, E, F...
+                id: String.fromCharCode(65 + j),
                 text: (row[2 + j] || '').trim(),
                 imageUrl: null
               });
             }
             
-            // STRICT EXACT-MATCH UPPERCASE CORRECT ANSWER
             correctAns = row[ansIdx]?.trim().toUpperCase() || '';
             marks = parseFloat(row[marksIdx]) || 2;
             negMarks = parseFloat(row[negMarksIdx]) || 0.66;
@@ -384,7 +374,6 @@ export default function CreateMockPage() {
     reader.readAsText(file);
   };
 
-  // ⚡ UPDATED TEMPLATE GENERATOR WITH 5 OPTIONS ⚡
   const downloadCsvTemplate = () => {
     const instructions = [
       "🛑 INSTRUCTIONS (DO NOT EDIT OR DELETE HEADERS)",
@@ -545,7 +534,6 @@ export default function CreateMockPage() {
     setTimeout(() => scrollToQuestion(questions.length), 100); 
   };
 
-  // ⚡ DYNAMIC OPTIONS FUNCTIONS ⚡
   const addOption = (qIndex) => {
     setQuestions(prev => {
         const updated = [...prev];
@@ -554,7 +542,7 @@ export default function CreateMockPage() {
             showToast("Maximum of 10 options allowed.", "warning");
             return updated;
         }
-        const nextId = String.fromCharCode(65 + currentOptions.length); // Next Letter (E, F, G...)
+        const nextId = String.fromCharCode(65 + currentOptions.length); 
         updated[qIndex].options.push({ id: nextId, text: "", imageUrl: null });
         return updated;
     });
@@ -565,12 +553,10 @@ export default function CreateMockPage() {
         const updated = [...prev];
         updated[qIndex].options.splice(optIndex, 1);
         
-        // Re-assign alphabet IDs to keep them sequential (A, B, C...)
         updated[qIndex].options.forEach((opt, idx) => {
             opt.id = String.fromCharCode(65 + idx);
         });
         
-        // Fix correctAnswer if it was relying on a deleted option
         if (updated[qIndex].type === 'MCQ') {
            const validIds = updated[qIndex].options.map(o => o.id);
            if (!validIds.includes(updated[qIndex].correctAnswer)) {
@@ -728,7 +714,7 @@ export default function CreateMockPage() {
           const shuffledOptions = [...data.options].sort(() => Math.random() - 0.5);
           
           finalQuestions[qIndex].options = shuffledOptions.map((text, idx) => ({
-              id: String.fromCharCode(65 + idx), // dynamic IDs based on API return
+              id: String.fromCharCode(65 + idx),
               text: text,
               hasImage: false,
               imageUrl: null
@@ -802,7 +788,6 @@ export default function CreateMockPage() {
     }
   };
 
-  // ⚡ DEPLOY / SAVE EXAM LOGIC ⚡
   const saveToDatabase = async () => {
     setShowDeployConfirm(false);
     if (questions.length === 0) return showToast("No questions to save!", "warning");
@@ -853,12 +838,14 @@ export default function CreateMockPage() {
   );
 
   return (
-    <div className="flex h-screen bg-slate-100 font-sans relative overflow-hidden">
+    // ⚡ FULLY INTEGRATED: Removed absolute inset/fixed heights so it flows within the layout ⚡
+    <div className="flex flex-col h-full bg-slate-100 font-sans relative overflow-hidden">
       
       <EducatorTour userId={user?.id} />
 
+      {/* QUICK JUMP NAV (Visible when questions > 0) */}
       {questions.length > 0 && (
-        <div className="fixed bottom-6 left-6 bg-white p-4 rounded-2xl shadow-2xl border border-slate-200 z-[90] max-w-[280px] hidden md:block animate-in slide-in-from-left-5">
+        <div className="absolute bottom-6 left-6 bg-white p-4 rounded-2xl shadow-2xl border border-slate-200 z-[90] max-w-[280px] hidden md:block animate-in slide-in-from-left-5">
           <div className="flex justify-between items-center mb-3">
              <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest"><i className="fas fa-th-large mr-1"></i> Quick Jump</h4>
              <span className="text-[10px] font-bold text-slate-400">{questions.length} Qs</span>
@@ -877,6 +864,7 @@ export default function CreateMockPage() {
         </div>
       )}
 
+      {/* TOAST NOTIFICATION */}
       {toast.show && (
         <div className={`fixed bottom-6 right-6 px-6 py-4 rounded-2xl shadow-2xl z-[9999] flex items-center gap-4 animate-in slide-in-from-bottom-5 backdrop-blur-xl border border-white/20 
           ${toast.type === 'success' ? 'bg-emerald-600/90 text-white' : toast.type === 'error' ? 'bg-rose-600/90 text-white' : 'bg-amber-500/90 text-slate-900'}`}>
@@ -899,12 +887,17 @@ export default function CreateMockPage() {
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center w-full">
                  <button onClick={() => setShowDeployConfirm(false)} className="px-6 py-3.5 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition w-full sm:w-1/2">Review Settings</button>
-                 <button onClick={saveToDatabase} className="px-6 py-3.5 text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20 rounded-xl transition w-full sm:w-1/2">Yes, Publish</button>
+                 
+                 {/* ⚡ GUEST BLOCKER FOR PUBLISHING ⚡ */}
+                 <GuestBlocker role="educator">
+                    <button onClick={saveToDatabase} className="px-6 py-3.5 text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20 rounded-xl transition w-full">Yes, Publish</button>
+                 </GuestBlocker>
               </div>
            </div>
         </div>
       )}
 
+      {/* DRAFT MODAL */}
       {showDraftModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[99999] flex items-center justify-center p-4">
            <div className="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-[95%] shadow-2xl border border-slate-200 animate-in zoom-in-95 relative overflow-hidden">
@@ -921,6 +914,7 @@ export default function CreateMockPage() {
         </div>
       )}
 
+      {/* DELETE CONFIRMATION MODAL */}
       {confirmDialog && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
            <div className="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-[95%] shadow-2xl border border-slate-200 animate-in zoom-in-95 relative overflow-hidden">
@@ -940,7 +934,7 @@ export default function CreateMockPage() {
         <ImageCropperModal src={cropperState.src} onCrop={handleCroppedImageUpload} onCancel={() => setCropperState({ show: false, src: null, file: null, targetQIndex: null, targetType: null, targetOptIndex: null })} />
       )}
 
-      {/* --- EXAM SETTINGS MODAL ⚡ UPGRADED SECURITY UI ⚡ --- */}
+      {/* --- EXAM SETTINGS MODAL --- */}
       {showSettingsModal && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[99999] flex justify-center items-start md:items-center pt-10 pb-10 md:pt-0 p-4 animate-in fade-in overflow-y-auto">
           <div id="tour-exam-settings" className="bg-white rounded-3xl p-6 md:p-8 max-w-2xl w-[95%] shadow-2xl border border-slate-200 my-auto">
@@ -950,7 +944,6 @@ export default function CreateMockPage() {
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-               
                {/* LEFT COLUMN: GENERAL SETTINGS */}
                <div className="space-y-5">
                  <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">General Info</h4>
@@ -1008,7 +1001,6 @@ export default function CreateMockPage() {
                    </button>
                  </div>
 
-                 {/* Security Toggle 1 */}
                  <div onClick={() => setBlockMobile(!blockMobile)} className={`flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-all ${blockMobile ? "bg-rose-50 border-rose-400" : "bg-slate-50 border-slate-200"}`}>
                    <div>
                      <span className="text-xs font-black text-slate-900 block">Block Mobile Phones</span>
@@ -1019,7 +1011,6 @@ export default function CreateMockPage() {
                    </div>
                  </div>
 
-                 {/* Security Toggle 2 */}
                  <div onClick={() => setBlockMultiple(!blockMultiple)} className={`flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-all ${blockMultiple ? "bg-rose-50 border-rose-400" : "bg-slate-50 border-slate-200"}`}>
                    <div>
                      <span className="text-xs font-black text-slate-900 block">Block Multiple Persons</span>
@@ -1030,7 +1021,6 @@ export default function CreateMockPage() {
                    </div>
                  </div>
 
-                 {/* Security Toggle 3 */}
                  <div onClick={() => setBlockTabSwitch(!blockTabSwitch)} className={`flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-all ${blockTabSwitch ? "bg-rose-50 border-rose-400" : "bg-slate-50 border-slate-200"}`}>
                    <div>
                      <span className="text-xs font-black text-slate-900 block">Block Tab Switching</span>
@@ -1041,7 +1031,6 @@ export default function CreateMockPage() {
                    </div>
                  </div>
 
-                 {/* Security Toggle 4 */}
                  <div onClick={() => setEnableWatermark(!enableWatermark)} className={`flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-all ${enableWatermark ? "bg-rose-50 border-rose-400" : "bg-slate-50 border-slate-200"}`}>
                    <div>
                      <span className="text-xs font-black text-slate-900 block">Forensic Watermarks</span>
@@ -1052,7 +1041,6 @@ export default function CreateMockPage() {
                    </div>
                  </div>
 
-                 {/* Security Toggle 5 */}
                  <div onClick={() => setSpotlightMode(!spotlightMode)} className={`flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-all ${spotlightMode ? "bg-rose-50 border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.2)]" : "bg-slate-50 border-slate-200"}`}>
                    <div>
                      <span className="text-xs font-black text-slate-900 block text-rose-600">Anti-Camera Spotlight</span>
@@ -1073,6 +1061,7 @@ export default function CreateMockPage() {
         </div>
       )}
 
+      {/* PUBLISHING PROGRESS MODAL */}
       {isPublishing && !publishedRoomId && (
         <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md z-[99999] flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
           <div className="bg-white p-8 md:p-10 rounded-[2.5rem] shadow-2xl flex flex-col items-center max-w-sm w-[95%] border border-slate-100 relative overflow-hidden">
@@ -1092,6 +1081,7 @@ export default function CreateMockPage() {
         </div>
       )}
 
+      {/* PUBLISHED SUCCESS MODAL */}
       {publishedRoomId && (
         <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md z-[99999] flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
           <div className="bg-white p-8 md:p-10 rounded-[2.5rem] shadow-2xl text-center max-w-md w-[95%] relative overflow-hidden">
@@ -1113,328 +1103,307 @@ export default function CreateMockPage() {
         </div>
       )}
 
-      {isMobileMenuOpen && ( <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)} /> )}
-
-      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-indigo-950 text-white flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
-        <div className="flex items-center justify-between p-5 border-b border-indigo-900">
-          <Link href="/onboarding?switch=true" className="text-xl font-black flex items-center gap-2 hover:text-emerald-400 transition cursor-pointer tracking-tight">
-            <i className="fas fa-book-open-reader text-emerald-400"></i> OZONE
-          </Link>
-          <button className="md:hidden text-indigo-300 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}><i className="fas fa-times text-lg"></i></button>
+      {/* --- STICKY HEADER --- */}
+      <header className="bg-white border-b border-slate-200 h-auto md:h-16 py-3 px-4 md:px-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-0 z-20 shrink-0 shadow-sm">
+        <div className="flex items-center gap-3 w-full md:max-w-[60%]">
+           
+           <button onClick={handleBackNavigation} className="shrink-0 bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50 transition-all flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-sm" title="Back to Dashboard">
+             <i className="fas fa-arrow-left"></i> <span className="hidden sm:block">Back</span>
+           </button>
+           
+           <input type="text" value={examTitle} onChange={(e) => setExamTitle(e.target.value)} className="text-base md:text-lg font-black text-slate-900 bg-transparent border-b-2 border-transparent hover:border-slate-200 focus:border-indigo-500 outline-none w-full transition-colors truncate" placeholder="Untitled Exam" />
         </div>
-        <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
-            <button onClick={() => router.push('/educator/dashboard')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
-                <i className="fas fa-home w-4"></i> Dashboard
-            </button>
-            <button onClick={() => router.push('/educator/create-mock')} className="w-full flex items-center gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-emerald-400 shadow-inner">
-                <i className="fas fa-file-pdf w-4 text-emerald-400"></i> Exam Studio
-            </button>
-            <button onClick={() => router.push('/educator/live-rooms')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
-                <i className="fas fa-door-open w-4"></i> Live Rooms
-            </button>
-            <button onClick={() => router.push('/educator/quiz-poll')} className="w-full flex items-center gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
-                <i className="fas fa-bolt w-4"></i> Live Quiz Poll
-            </button>
-        </nav>
-        <div className="p-3 border-t border-indigo-900 bg-indigo-900/30 space-y-1.5">
-            <div className="flex items-center gap-2.5 p-2.5 bg-indigo-950/50 rounded-xl border border-indigo-800/50 shadow-inner">
-                <img src={user?.imageUrl || "https://ui-avatars.com/api/?name=Educator"} alt="Avatar" className="w-7 h-7 rounded-full border border-indigo-700" />
-                <div className="text-xs font-bold truncate flex-1 text-indigo-100">{user?.fullName || "Account"}</div>
-            </div>
-            <button onClick={() => router.push('/onboarding?switch=true')} className="w-full flex items-center justify-center gap-2 text-indigo-300 hover:bg-indigo-800 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-transparent hover:border-indigo-700 shadow-sm">
-                <i className="fas fa-exchange-alt"></i> Switch Role
-            </button>
-            <button onClick={() => signOut({ redirectUrl: '/' })} className="w-full flex items-center justify-center gap-2 text-rose-400 hover:bg-rose-600 hover:text-white p-2 rounded-xl transition text-xs font-bold border border-rose-900/50 hover:border-rose-500 bg-rose-950/20 shadow-sm">
-                <i className="fas fa-sign-out-alt"></i> Log Out
-            </button>
-        </div>
-      </aside>
-
-      <main className="flex-1 flex flex-col h-screen overflow-hidden">
         
-        <header className="bg-white border-b border-slate-200 h-auto md:h-16 py-3 px-4 md:px-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-0 z-20 shrink-0 shadow-sm">
-          <div className="flex items-center gap-3 w-full md:max-w-[60%]">
-             <button className="md:hidden text-slate-600 shrink-0" onClick={() => setIsMobileMenuOpen(true)}><i className="fas fa-bars text-xl"></i></button>
-             
-             <button onClick={handleBackNavigation} className="shrink-0 bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50 transition-all flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-sm" title="Back to Dashboard">
-               <i className="fas fa-arrow-left"></i> <span className="hidden sm:block">Back</span>
-             </button>
-             
-             <input type="text" value={examTitle} onChange={(e) => setExamTitle(e.target.value)} className="text-base md:text-lg font-black text-slate-900 bg-transparent border-b-2 border-transparent hover:border-slate-200 focus:border-indigo-500 outline-none w-full transition-colors truncate" placeholder="Untitled Exam" />
-          </div>
+        <div className="flex items-center gap-2 md:gap-3 w-full md:w-auto justify-end shrink-0">
+          <button onClick={() => setShowSettingsModal(true)} className="flex-1 md:flex-none justify-center bg-slate-100 text-slate-600 px-3 py-2 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-sm hover:bg-slate-200 transition flex items-center gap-2 border border-slate-200">
+            <i className="fas fa-cog"></i> <span>Settings</span>
+          </button>
           
-          <div className="flex items-center gap-2 md:gap-3 w-full md:w-auto justify-end shrink-0">
-            <button onClick={() => setShowSettingsModal(true)} className="flex-1 md:flex-none justify-center bg-slate-100 text-slate-600 px-3 py-2 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-sm hover:bg-slate-200 transition flex items-center gap-2 border border-slate-200">
-              <i className="fas fa-cog"></i> <span>Settings</span>
-            </button>
+          {/* ⚡ GUEST BLOCKER FOR PUBLISH ⚡ */}
+          <GuestBlocker role="educator">
             <button id="tour-publish" onClick={confirmDeploy} disabled={questions.length === 0 || uploadingCount > 0 || isPublishing} className="flex-1 md:flex-none justify-center bg-emerald-600 text-white px-4 py-2 md:px-6 md:py-2 rounded-lg text-xs md:text-sm font-bold shadow-md hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
               {isPublishing ? <><i className="fas fa-spinner fa-spin"></i> <span>Deploying...</span></> : <><i className="fas fa-paper-plane"></i> Publish</>}
             </button>
-          </div>
-        </header>
+          </GuestBlocker>
+        </div>
+      </header>
 
-        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+      {/* --- TWO COLUMN LAYOUT --- */}
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+        
+        {/* PDF VIEW */}
+        <div className={`transition-all duration-500 ease-in-out border-b lg:border-b-0 lg:border-r border-slate-300 bg-slate-200 flex flex-col relative ${pdfUrl ? 'h-1/2 lg:h-full lg:w-1/2' : 'h-0 lg:w-0 lg:h-full opacity-0 overflow-hidden'}`}>
+          <div className="h-10 md:h-12 bg-slate-800 text-white flex items-center justify-between px-4 shrink-0 shadow-md z-10">
+            <span className="text-[10px] md:text-xs font-bold truncate flex-1"><i className="fas fa-file-pdf text-rose-400 mr-2"></i> {file?.name}</span>
+          </div>
+          {pdfUrl && <iframe src={`${pdfUrl}#toolbar=0`} className="w-full flex-1 border-none" title="PDF Viewer" />}
+        </div>
+
+        {/* EDITOR VIEW */}
+        <div className={`flex-1 flex flex-col bg-slate-50 transition-all duration-500 overflow-hidden ${pdfUrl ? 'h-1/2 lg:h-full lg:w-1/2' : 'h-full w-full'}`}>
           
-          <div className={`transition-all duration-500 ease-in-out border-b lg:border-b-0 lg:border-r border-slate-300 bg-slate-200 flex flex-col relative ${pdfUrl ? 'h-1/2 lg:h-full lg:w-1/2' : 'h-0 lg:w-0 lg:h-full opacity-0 overflow-hidden'}`}>
-            <div className="h-10 md:h-12 bg-slate-800 text-white flex items-center justify-between px-4 shrink-0 shadow-md z-10">
-              <span className="text-[10px] md:text-xs font-bold truncate flex-1"><i className="fas fa-file-pdf text-rose-400 mr-2"></i> {file?.name}</span>
+          {/* BULK UPLOAD BAR */}
+          <div id="tour-pdf-extract" className="bg-white p-3 md:p-4 border-b border-slate-200 shrink-0 shadow-sm flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between z-10">
+            <div className="flex items-center gap-2 w-full xl:w-auto overflow-x-auto pb-1 xl:pb-0">
+              <label className="flex-1 xl:flex-none justify-center bg-emerald-50 border border-emerald-300 text-emerald-700 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-emerald-100 transition flex items-center shadow-sm whitespace-nowrap">
+                <i className="fas fa-file-csv mr-2 text-emerald-600"></i> <span>Bulk CSV</span>
+                <input type="file" accept=".csv" className="hidden" onChange={handleCsvUpload} />
+              </label>
+              <label className="flex-1 xl:flex-none justify-center bg-slate-100 border border-slate-300 text-slate-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-slate-200 transition flex items-center shadow-sm whitespace-nowrap">
+                <i className="fas fa-upload mr-2 text-rose-500"></i> <span>Upload PDF</span>
+                <input type="file" accept="application/pdf" className="hidden" onChange={handleFileChange} />
+              </label>
+              <label className="flex-1 xl:flex-none justify-center bg-indigo-50 border border-indigo-200 text-indigo-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-100 transition flex items-center shadow-sm whitespace-nowrap">
+                <i className="fas fa-camera mr-2 text-indigo-600"></i> <span>Scan Phone</span>
+                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => {
+                  const imgFile = e.target.files[0];
+                  if (imgFile) { setFile(imgFile); setPdfUrl(null); showToast("Photo captured! Use 'Extract Qs' or crop.", "success"); }
+                }} />
+              </label>
             </div>
-            {pdfUrl && <iframe src={`${pdfUrl}#toolbar=0`} className="w-full flex-1 border-none" title="PDF Viewer" />}
-          </div>
 
-          <div className={`flex-1 flex flex-col bg-slate-50 transition-all duration-500 overflow-hidden ${pdfUrl ? 'h-1/2 lg:h-full lg:w-1/2' : 'h-full w-full'}`}>
-            
-            {/* ⚡ BULK CSV UPLOAD BAR ⚡ */}
-            <div id="tour-pdf-extract" className="bg-white p-3 md:p-4 border-b border-slate-200 shrink-0 shadow-sm flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between z-10">
-              <div className="flex items-center gap-2 w-full xl:w-auto overflow-x-auto pb-1 xl:pb-0">
-                <label className="flex-1 xl:flex-none justify-center bg-emerald-50 border border-emerald-300 text-emerald-700 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-emerald-100 transition flex items-center shadow-sm whitespace-nowrap">
-                  <i className="fas fa-file-csv mr-2 text-emerald-600"></i> <span>Bulk CSV</span>
-                  <input type="file" accept=".csv" className="hidden" onChange={handleCsvUpload} />
-                </label>
-                <label className="flex-1 xl:flex-none justify-center bg-slate-100 border border-slate-300 text-slate-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-slate-200 transition flex items-center shadow-sm whitespace-nowrap">
-                  <i className="fas fa-upload mr-2 text-rose-500"></i> <span>Upload PDF</span>
-                  <input type="file" accept="application/pdf" className="hidden" onChange={handleFileChange} />
-                </label>
-                <label className="flex-1 xl:flex-none justify-center bg-indigo-50 border border-indigo-200 text-indigo-800 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-100 transition flex items-center shadow-sm whitespace-nowrap">
-                  <i className="fas fa-camera mr-2 text-indigo-600"></i> <span>Scan Phone</span>
-                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => {
-                    const imgFile = e.target.files[0];
-                    if (imgFile) { setFile(imgFile); setPdfUrl(null); showToast("Photo captured! Use 'Extract Qs' or crop.", "success"); }
-                  }} />
-                </label>
-              </div>
+            <div className="flex items-center gap-3 w-full xl:w-auto justify-between xl:justify-end">
+               <div id="tour-page-range" className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200">
+                 <input type="number" min="1" value={startPage} onChange={e => setStartPage(e.target.value)} className="w-10 text-center text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded py-1 outline-none focus:border-indigo-500 shadow-inner"/>
+                 <span className="text-[10px] text-slate-400 font-black uppercase">To</span>
+                 <input type="number" min="1" value={endPage} onChange={e => setEndPage(e.target.value)} className="w-10 text-center text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded py-1 outline-none focus:border-indigo-500 shadow-inner"/>
+               </div>
+               
+               <div id="tour-ai-solutions" className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-100 shadow-sm">
+                  <span className="text-[10px] font-black text-indigo-700 hidden sm:block">AI Solutions</span>
+                  <i className="fas fa-brain text-indigo-500 sm:hidden"></i>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" checked={generateExplanations} onChange={(e) => setGenerateExplanations(e.target.checked)} className="sr-only peer" />
+                    <div className="w-7 h-4 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500"></div>
+                  </label>
+               </div>
 
-              <div className="flex items-center gap-3 w-full xl:w-auto justify-between xl:justify-end">
-                 <div id="tour-page-range" className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200">
-                   <input type="number" min="1" value={startPage} onChange={e => setStartPage(e.target.value)} className="w-10 text-center text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded py-1 outline-none focus:border-indigo-500 shadow-inner"/>
-                   <span className="text-[10px] text-slate-400 font-black uppercase">To</span>
-                   <input type="number" min="1" value={endPage} onChange={e => setEndPage(e.target.value)} className="w-10 text-center text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded py-1 outline-none focus:border-indigo-500 shadow-inner"/>
-                 </div>
-                 
-                 <div id="tour-ai-solutions" className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-100 shadow-sm">
-                    <span className="text-[10px] font-black text-indigo-700 hidden sm:block">AI Solutions</span>
-                    <i className="fas fa-brain text-indigo-500 sm:hidden"></i>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" checked={generateExplanations} onChange={(e) => setGenerateExplanations(e.target.checked)} className="sr-only peer" />
-                      <div className="w-7 h-4 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500"></div>
-                    </label>
-                 </div>
-
+               {/* ⚡ GUEST BLOCKER FOR AI PDF EXTRACT ⚡ */}
+               <GuestBlocker role="educator">
                  <button onClick={handleExtract} disabled={!file || isProcessing} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-md hover:bg-indigo-600 disabled:opacity-50 disabled:bg-slate-400 transition flex items-center gap-1.5">
                    {isProcessing ? <><i className="fas fa-spinner fa-spin"></i></> : <><i className="fas fa-magic"></i> <span className="hidden sm:block">Extract</span></>}
                  </button>
-              </div>
+               </GuestBlocker>
             </div>
+          </div>
 
-            <div className="flex-1 overflow-y-auto p-3 md:p-6 scroll-smooth bg-slate-50/50">
-              <div className="max-w-4xl mx-auto space-y-4 pb-32">
-                
-                {questions.length === 0 ? (
-                  <div className="mt-10 md:mt-20 flex flex-col items-center justify-center animate-in fade-in zoom-in duration-500 px-4">
-                     <div className="w-24 h-24 bg-indigo-50 text-indigo-400 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-inner border border-indigo-100/50 transform -rotate-3"><i className="fas fa-file-signature"></i></div>
-                     <h2 className="text-2xl md:text-3xl font-black text-slate-800 mb-3 text-center tracking-tight">Your Exam is Empty</h2>
-                     <p className="text-sm font-medium text-slate-500 max-w-md text-center mb-8 leading-relaxed">Upload a document to the top bar to extract questions using AI, upload a CSV file, or start building manually.</p>
-                     
-                     <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
-                       <button id="tour-manual-build" onClick={handleAddCustomQuestion} disabled={isProcessing} className="bg-emerald-500 text-white px-8 py-3.5 rounded-xl font-black hover:bg-emerald-600 hover:-translate-y-1 transition-all text-sm md:text-base shadow-lg shadow-emerald-500/30 flex items-center gap-3 group relative overflow-hidden w-full sm:w-auto justify-center">
-                         <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500"></div>
-                         <i className="fas fa-plus text-lg"></i> Build from Scratch
-                       </button>
-                       <button onClick={downloadCsvTemplate} className="bg-white text-slate-700 border border-slate-300 px-8 py-3.5 rounded-xl font-bold hover:bg-slate-50 hover:-translate-y-1 transition-all text-sm shadow-sm flex items-center gap-3 w-full sm:w-auto justify-center">
-                         <i className="fas fa-download text-emerald-500"></i> Download CSV Template
-                       </button>
-                     </div>
-                  </div>
-                ) : (
-                  questions.map((q, qIndex) => {
-                    const isExpanded = expandedQIndex === qIndex;
+          {/* QUESTIONS LIST */}
+          <div className="flex-1 overflow-y-auto p-3 md:p-6 scroll-smooth bg-slate-50/50">
+            <div className="max-w-4xl mx-auto space-y-4 pb-32">
+              
+              {questions.length === 0 ? (
+                <div className="mt-10 md:mt-20 flex flex-col items-center justify-center animate-in fade-in zoom-in duration-500 px-4">
+                   <div className="w-24 h-24 bg-indigo-50 text-indigo-400 rounded-[2rem] flex items-center justify-center text-5xl mb-6 shadow-inner border border-indigo-100/50 transform -rotate-3"><i className="fas fa-file-signature"></i></div>
+                   <h2 className="text-2xl md:text-3xl font-black text-slate-800 mb-3 text-center tracking-tight">Your Exam is Empty</h2>
+                   <p className="text-sm font-medium text-slate-500 max-w-md text-center mb-8 leading-relaxed">Upload a document to the top bar to extract questions using AI, upload a CSV file, or start building manually.</p>
+                   
+                   <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
+                     <button id="tour-manual-build" onClick={handleAddCustomQuestion} disabled={isProcessing} className="bg-emerald-500 text-white px-8 py-3.5 rounded-xl font-black hover:bg-emerald-600 hover:-translate-y-1 transition-all text-sm md:text-base shadow-lg shadow-emerald-500/30 flex items-center gap-3 group relative overflow-hidden w-full sm:w-auto justify-center">
+                       <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500"></div>
+                       <i className="fas fa-plus text-lg"></i> Build from Scratch
+                     </button>
+                     <button onClick={downloadCsvTemplate} className="bg-white text-slate-700 border border-slate-300 px-8 py-3.5 rounded-xl font-bold hover:bg-slate-50 hover:-translate-y-1 transition-all text-sm shadow-sm flex items-center gap-3 w-full sm:w-auto justify-center">
+                       <i className="fas fa-download text-emerald-500"></i> Download CSV Template
+                     </button>
+                   </div>
+                </div>
+              ) : (
+                questions.map((q, qIndex) => {
+                  const isExpanded = expandedQIndex === qIndex;
 
-                    return (
-                      <div key={qIndex} ref={el => questionRefs.current[qIndex] = el} className={`bg-white border rounded-2xl transition-all duration-200 overflow-hidden ${isExpanded ? 'border-indigo-400 shadow-xl ring-4 ring-indigo-50/50' : 'border-slate-200 shadow-sm hover:border-slate-300'}`}>
-                        
-                        <div onClick={() => setExpandedQIndex(isExpanded ? null : qIndex)} className={`p-4 flex items-center gap-3 md:gap-4 cursor-pointer select-none transition-colors ${isExpanded ? 'bg-indigo-50/50 border-b border-indigo-100' : 'hover:bg-slate-50'}`}>
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${isExpanded ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-700'}`}>{qIndex + 1}</div>
-                          <div className="flex-1 min-w-0 flex items-center gap-2 md:gap-3">
-                            <span className="text-[10px] font-black px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">{q.type}</span>
-                            <div className="text-sm font-bold text-slate-900 truncate overflow-hidden whitespace-nowrap"><Latex>{q.text || "Empty Question..."}</Latex></div>
-                          </div>
-                          <button onClick={(e) => { e.stopPropagation(); requestRemoveQuestion(qIndex); }} className="text-slate-400 hover:text-rose-600 transition px-2"><i className="fas fa-trash"></i></button>
+                  return (
+                    <div key={qIndex} ref={el => questionRefs.current[qIndex] = el} className={`bg-white border rounded-2xl transition-all duration-200 overflow-hidden ${isExpanded ? 'border-indigo-400 shadow-xl ring-4 ring-indigo-50/50' : 'border-slate-200 shadow-sm hover:border-slate-300'}`}>
+                      
+                      <div onClick={() => setExpandedQIndex(isExpanded ? null : qIndex)} className={`p-4 flex items-center gap-3 md:gap-4 cursor-pointer select-none transition-colors ${isExpanded ? 'bg-indigo-50/50 border-b border-indigo-100' : 'hover:bg-slate-50'}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${isExpanded ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-700'}`}>{qIndex + 1}</div>
+                        <div className="flex-1 min-w-0 flex items-center gap-2 md:gap-3">
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">{q.type}</span>
+                          <div className="text-sm font-bold text-slate-900 truncate overflow-hidden whitespace-nowrap"><Latex>{q.text || "Empty Question..."}</Latex></div>
                         </div>
+                        <button onClick={(e) => { e.stopPropagation(); requestRemoveQuestion(qIndex); }} className="text-slate-400 hover:text-rose-600 transition px-2"><i className="fas fa-trash"></i></button>
+                      </div>
 
-                        {isExpanded && (
-                          <div className="p-4 md:p-5 bg-white">
-                            
-                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 pb-4 border-b border-slate-100 gap-4">
-                               <div className="flex flex-wrap gap-4 w-full sm:w-auto">
-                                  <select value={q.type || "MCQ"} onChange={(e) => handleTypeChange(qIndex, e.target.value)} className="bg-slate-50 border border-slate-300 rounded-lg text-xs px-3 py-1.5 font-bold text-slate-900 outline-none focus:border-indigo-400 cursor-pointer shadow-sm">
-                                      <option value="MCQ">MCQ</option> <option value="MSQ">MSQ</option> <option value="NAT">NAT</option>
-                                  </select>
-                                  <div className="flex items-center gap-2 sm:border-l border-slate-200 sm:pl-4">
-                                    <span className="text-[10px] font-black text-emerald-700 uppercase">+ Mk:</span>
-                                    <input type="number" step="0.5" value={q.marks} onChange={(e) => updateQuestionField(qIndex, 'marks', e.target.value)} className="w-14 bg-white border border-slate-300 rounded text-xs px-2 py-1 text-center font-black text-slate-900 outline-none shadow-sm focus:border-emerald-500"/>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-black text-rose-700 uppercase">- Mk:</span>
-                                    <input type="number" step="0.1" value={q.negativeMarks} onChange={(e) => updateQuestionField(qIndex, 'negativeMarks', e.target.value)} className="w-14 bg-white border border-slate-300 rounded text-xs px-2 py-1 text-center font-black text-slate-900 outline-none shadow-sm focus:border-rose-500"/>
-                                  </div>
-                               </div>
-                               
-                               <label className="text-[10px] font-black text-indigo-700 bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-200 cursor-pointer hover:bg-indigo-100 hover:shadow-md transition inline-flex items-center justify-center gap-1.5 shadow-sm w-full sm:w-auto">
-                                 <i className="fas fa-crop-alt"></i> Upload Diagram
-                                 <input type="file" accept="image/*" className="hidden" onChange={(e) => initiateImageUpload(e.target.files[0], qIndex, 'question')} />
-                               </label>
+                      {isExpanded && (
+                        <div className="p-4 md:p-5 bg-white">
+                          
+                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 pb-4 border-b border-slate-100 gap-4">
+                             <div className="flex flex-wrap gap-4 w-full sm:w-auto">
+                                <select value={q.type || "MCQ"} onChange={(e) => handleTypeChange(qIndex, e.target.value)} className="bg-slate-50 border border-slate-300 rounded-lg text-xs px-3 py-1.5 font-bold text-slate-900 outline-none focus:border-indigo-400 cursor-pointer shadow-sm">
+                                    <option value="MCQ">MCQ</option> <option value="MSQ">MSQ</option> <option value="NAT">NAT</option>
+                                </select>
+                                <div className="flex items-center gap-2 sm:border-l border-slate-200 sm:pl-4">
+                                  <span className="text-[10px] font-black text-emerald-700 uppercase">+ Mk:</span>
+                                  <input type="number" step="0.5" value={q.marks} onChange={(e) => updateQuestionField(qIndex, 'marks', e.target.value)} className="w-14 bg-white border border-slate-300 rounded text-xs px-2 py-1 text-center font-black text-slate-900 outline-none shadow-sm focus:border-emerald-500"/>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-black text-rose-700 uppercase">- Mk:</span>
+                                  <input type="number" step="0.1" value={q.negativeMarks} onChange={(e) => updateQuestionField(qIndex, 'negativeMarks', e.target.value)} className="w-14 bg-white border border-slate-300 rounded text-xs px-2 py-1 text-center font-black text-slate-900 outline-none shadow-sm focus:border-rose-500"/>
+                                </div>
+                             </div>
+                             
+                             <label className="text-[10px] font-black text-indigo-700 bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-200 cursor-pointer hover:bg-indigo-100 hover:shadow-md transition inline-flex items-center justify-center gap-1.5 shadow-sm w-full sm:w-auto">
+                               <i className="fas fa-crop-alt"></i> Upload Diagram
+                               <input type="file" accept="image/*" className="hidden" onChange={(e) => initiateImageUpload(e.target.files[0], qIndex, 'question')} />
+                             </label>
+                          </div>
+
+                          {q.imageUrl && (
+                            <div className="relative rounded-xl border border-slate-300 overflow-hidden bg-slate-100 p-2 inline-block mb-4 shadow-inner">
+                              <button onClick={() => removeImage(qIndex, 'question')} className="absolute top-2 right-2 bg-rose-600/90 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px] z-20 hover:scale-110 shadow-md"><i className="fas fa-times"></i></button>
+                              {q.isUploadingQ && <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10"><i className="fas fa-spinner fa-spin text-indigo-600 text-2xl"></i></div>}
+                              <img src={q.imageUrl} alt="Q" className={`max-h-48 mx-auto object-contain rounded ${q.isUploadingQ ? 'opacity-30 blur-sm' : ''}`} />
                             </div>
+                          )}
 
-                            {q.imageUrl && (
-                              <div className="relative rounded-xl border border-slate-300 overflow-hidden bg-slate-100 p-2 inline-block mb-4 shadow-inner">
-                                <button onClick={() => removeImage(qIndex, 'question')} className="absolute top-2 right-2 bg-rose-600/90 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px] z-20 hover:scale-110 shadow-md"><i className="fas fa-times"></i></button>
-                                {q.isUploadingQ && <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10"><i className="fas fa-spinner fa-spin text-indigo-600 text-2xl"></i></div>}
-                                <img src={q.imageUrl} alt="Q" className={`max-h-48 mx-auto object-contain rounded ${q.isUploadingQ ? 'opacity-30 blur-sm' : ''}`} />
-                              </div>
-                            )}
+                          <div className="mb-3 p-4 bg-emerald-50/50 rounded-xl border border-emerald-200 shadow-sm">
+                            <span className="text-[9px] font-black uppercase text-emerald-700 block mb-1">Student Preview</span>
+                            <div className="text-sm font-bold text-slate-900 leading-relaxed overflow-x-auto"><Latex>{q.text || "Type your question below..."}</Latex></div>
+                          </div>
 
-                            <div className="mb-3 p-4 bg-emerald-50/50 rounded-xl border border-emerald-200 shadow-sm">
-                              <span className="text-[9px] font-black uppercase text-emerald-700 block mb-1">Student Preview</span>
-                              <div className="text-sm font-bold text-slate-900 leading-relaxed overflow-x-auto"><Latex>{q.text || "Type your question below..."}</Latex></div>
+                          <div className="relative mb-6 mt-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Question Code Editor (Raw Text & Math)</label>
+                            <textarea 
+                              value={q.text} onChange={(e) => updateQuestionField(qIndex, 'text', e.target.value)} onPaste={(e) => handlePaste(e, qIndex, 'question')}
+                              placeholder="Type your question here..." 
+                              className="w-full bg-slate-50 border border-slate-300 rounded-xl p-4 pr-12 text-sm font-bold text-slate-900 focus:border-indigo-500 focus:bg-white outline-none resize-y min-h-[80px] shadow-inner transition-shadow" 
+                            />
+                            <button onClick={() => toggleDictation(qIndex, 'text')} className={`absolute bottom-3 right-3 p-2 rounded-lg transition-colors shadow-sm border ${listeningField === `q-${qIndex}-text` ? 'bg-rose-100 text-rose-600 border-rose-300 animate-pulse' : 'bg-white text-slate-500 border-slate-200 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'}`}>
+                              <i className="fas fa-microphone"></i>
+                            </button>
+                          </div>
+
+                          {q.type === 'NAT' ? (
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-300 mb-6 shadow-inner">
+                              <label className="block text-[10px] font-black text-slate-600 mb-2 uppercase">Numerical Answer</label>
+                              <input type="text" value={q.correctAnswer || ''} onChange={(e) => updateQuestionField(qIndex, 'correctAnswer', e.target.value)} className="w-full sm:max-w-xs bg-white border border-slate-300 rounded-lg p-3 text-lg font-black text-slate-900 outline-none focus:border-indigo-500 shadow-sm" />
                             </div>
-
-                            <div className="relative mb-6 mt-2">
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Question Code Editor (Raw Text & Math)</label>
-                              <textarea 
-                                value={q.text} onChange={(e) => updateQuestionField(qIndex, 'text', e.target.value)} onPaste={(e) => handlePaste(e, qIndex, 'question')}
-                                placeholder="Type your question here..." 
-                                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-4 pr-12 text-sm font-bold text-slate-900 focus:border-indigo-500 focus:bg-white outline-none resize-y min-h-[80px] shadow-inner transition-shadow" 
-                              />
-                              <button onClick={() => toggleDictation(qIndex, 'text')} className={`absolute bottom-3 right-3 p-2 rounded-lg transition-colors shadow-sm border ${listeningField === `q-${qIndex}-text` ? 'bg-rose-100 text-rose-600 border-rose-300 animate-pulse' : 'bg-white text-slate-500 border-slate-200 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'}`}>
-                                <i className="fas fa-microphone"></i>
-                              </button>
-                            </div>
-
-                            {q.type === 'NAT' ? (
-                              <div className="bg-slate-50 p-4 rounded-xl border border-slate-300 mb-6 shadow-inner">
-                                <label className="block text-[10px] font-black text-slate-600 mb-2 uppercase">Numerical Answer</label>
-                                <input type="text" value={q.correctAnswer || ''} onChange={(e) => updateQuestionField(qIndex, 'correctAnswer', e.target.value)} className="w-full sm:max-w-xs bg-white border border-slate-300 rounded-lg p-3 text-lg font-black text-slate-900 outline-none focus:border-indigo-500 shadow-sm" />
-                              </div>
-                            ) : (
-                              <>
-                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-3">
-                                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Answer Choices</span>
-                                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                                    <button onClick={() => addOption(qIndex)} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-black px-3 py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 shadow-sm border border-emerald-200 flex-1 sm:flex-none">
-                                      <i className="fas fa-plus"></i> Add Option
-                                    </button>
+                          ) : (
+                            <>
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-3">
+                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Answer Choices</span>
+                                <div className="flex items-center gap-2 w-full sm:w-auto">
+                                  <button onClick={() => addOption(qIndex)} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-black px-3 py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 shadow-sm border border-emerald-200 flex-1 sm:flex-none">
+                                    <i className="fas fa-plus"></i> Add Option
+                                  </button>
+                                  
+                                  {/* ⚡ GUEST BLOCKER FOR AI AUTO FILL ⚡ */}
+                                  <GuestBlocker role="educator">
                                     <button onClick={() => generateOptions(qIndex)} disabled={q.isGeneratingOptions} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[10px] font-black px-3 py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 shadow-sm border border-indigo-200 disabled:opacity-50 flex-1 sm:flex-none">
                                       {q.isGeneratingOptions ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-wand-magic-sparkles"></i>} 
                                       <span className="hidden sm:inline">AI Auto-Fill</span>
                                     </button>
-                                  </div>
+                                  </GuestBlocker>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                                  {q.options?.map((opt, optIndex) => {
-                                    const isCorrect = q.type === 'MSQ' ? (Array.isArray(q.correctAnswer) && q.correctAnswer.includes(opt.id)) : q.correctAnswer === opt.id;
-                                    return (
-                                      <div key={optIndex} className={`flex items-start gap-3 p-3 rounded-xl border transition-colors ${isCorrect ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-300' : 'border-slate-300 bg-slate-50 hover:border-slate-400'}`}>
-                                        <input type={q.type === "MSQ" ? "checkbox" : "radio"} checked={isCorrect} onChange={() => q.type === "MSQ" ? toggleMsqAnswer(qIndex, opt.id) : updateQuestionField(qIndex, 'correctAnswer', opt.id)} className="mt-2 w-4 h-4 accent-emerald-600 cursor-pointer shrink-0" />
-                                        <div className="flex-1 min-w-0">
-                                          <div className="relative mb-2">
-                                            <input type="text" value={opt.text} onChange={(e) => updateOptionText(qIndex, optIndex, e.target.value)} onPaste={(e) => handlePaste(e, qIndex, 'option', optIndex)} placeholder={`Option ${opt.id}...`} className={`w-full bg-white border border-slate-300 rounded-lg p-2.5 pr-16 text-xs font-bold text-slate-900 focus:border-indigo-500 outline-none shadow-sm ${q.isGeneratingOptions ? 'opacity-50 animate-pulse' : ''}`} disabled={q.isGeneratingOptions} />
-                                            <div className="absolute top-1.5 right-1.5 flex gap-1">
-                                                <button onClick={() => toggleDictation(qIndex, 'option', optIndex)} className={`p-1.5 rounded transition border ${listeningField === `q-${qIndex}-opt-${optIndex}` ? 'bg-rose-100 text-rose-600 border-rose-200 animate-pulse' : 'bg-slate-100 text-slate-400 border-transparent hover:text-indigo-600 hover:bg-white hover:border-slate-200'}`}>
-                                                  <i className="fas fa-microphone"></i>
-                                                </button>
-                                                {q.options.length > 2 && (
-                                                    <button onClick={() => removeOption(qIndex, optIndex)} className="p-1.5 rounded transition border bg-slate-100 text-rose-400 border-transparent hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200" title="Remove Option">
-                                                        <i className="fas fa-trash"></i>
-                                                    </button>
-                                                )}
-                                            </div>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                                {q.options?.map((opt, optIndex) => {
+                                  const isCorrect = q.type === 'MSQ' ? (Array.isArray(q.correctAnswer) && q.correctAnswer.includes(opt.id)) : q.correctAnswer === opt.id;
+                                  return (
+                                    <div key={optIndex} className={`flex items-start gap-3 p-3 rounded-xl border transition-colors ${isCorrect ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-300' : 'border-slate-300 bg-slate-50 hover:border-slate-400'}`}>
+                                      <input type={q.type === "MSQ" ? "checkbox" : "radio"} checked={isCorrect} onChange={() => q.type === "MSQ" ? toggleMsqAnswer(qIndex, opt.id) : updateQuestionField(qIndex, 'correctAnswer', opt.id)} className="mt-2 w-4 h-4 accent-emerald-600 cursor-pointer shrink-0" />
+                                      <div className="flex-1 min-w-0">
+                                        <div className="relative mb-2">
+                                          <input type="text" value={opt.text} onChange={(e) => updateOptionText(qIndex, optIndex, e.target.value)} onPaste={(e) => handlePaste(e, qIndex, 'option', optIndex)} placeholder={`Option ${opt.id}...`} className={`w-full bg-white border border-slate-300 rounded-lg p-2.5 pr-16 text-xs font-bold text-slate-900 focus:border-indigo-500 outline-none shadow-sm ${q.isGeneratingOptions ? 'opacity-50 animate-pulse' : ''}`} disabled={q.isGeneratingOptions} />
+                                          <div className="absolute top-1.5 right-1.5 flex gap-1">
+                                              <button onClick={() => toggleDictation(qIndex, 'option', optIndex)} className={`p-1.5 rounded transition border ${listeningField === `q-${qIndex}-opt-${optIndex}` ? 'bg-rose-100 text-rose-600 border-rose-200 animate-pulse' : 'bg-slate-100 text-slate-400 border-transparent hover:text-indigo-600 hover:bg-white hover:border-slate-200'}`}>
+                                                <i className="fas fa-microphone"></i>
+                                              </button>
+                                              {q.options.length > 2 && (
+                                                  <button onClick={() => removeOption(qIndex, optIndex)} className="p-1.5 rounded transition border bg-slate-100 text-rose-400 border-transparent hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200" title="Remove Option">
+                                                      <i className="fas fa-trash"></i>
+                                                  </button>
+                                              )}
                                           </div>
-                                          <div className="flex flex-col sm:flex-row sm:items-center justify-between mt-1 px-1 gap-2">
-                                             <div className="text-[10px] font-black text-slate-700 truncate overflow-x-auto max-w-[150px]"><Latex>{opt.text}</Latex></div>
-                                             <label className="shrink-0 text-[10px] font-black text-indigo-700 cursor-pointer hover:bg-indigo-100 transition bg-indigo-50 px-2 py-1 rounded border border-indigo-200 shadow-sm self-start sm:self-auto">
-                                               <i className="fas fa-image mr-1"></i> Add Image
-                                               <input type="file" accept="image/*" className="hidden" onChange={(e) => initiateImageUpload(e.target.files[0], qIndex, 'option', optIndex)} />
-                                             </label>
-                                          </div>
-                                          {opt.imageUrl && (
-                                            <div className="relative mt-2 inline-block border border-slate-300 rounded-lg bg-slate-100 p-1 shadow-inner">
-                                               <button onClick={() => removeImage(qIndex, 'option', optIndex)} className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] shadow-md hover:scale-110"><i className="fas fa-times"></i></button>
-                                               {opt.isUploading && <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10"><i className="fas fa-spinner fa-spin text-indigo-600 text-xs"></i></div>}
-                                               <img src={opt.imageUrl} className={`max-h-20 object-contain rounded ${opt.isUploading ? 'opacity-30' : ''}`} />
-                                            </div>
-                                          )}
                                         </div>
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between mt-1 px-1 gap-2">
+                                           <div className="text-[10px] font-black text-slate-700 truncate overflow-x-auto max-w-[150px]"><Latex>{opt.text}</Latex></div>
+                                           <label className="shrink-0 text-[10px] font-black text-indigo-700 cursor-pointer hover:bg-indigo-100 transition bg-indigo-50 px-2 py-1 rounded border border-indigo-200 shadow-sm self-start sm:self-auto">
+                                             <i className="fas fa-image mr-1"></i> Add Image
+                                             <input type="file" accept="image/*" className="hidden" onChange={(e) => initiateImageUpload(e.target.files[0], qIndex, 'option', optIndex)} />
+                                           </label>
+                                        </div>
+                                        {opt.imageUrl && (
+                                          <div className="relative mt-2 inline-block border border-slate-300 rounded-lg bg-slate-100 p-1 shadow-inner">
+                                             <button onClick={() => removeImage(qIndex, 'option', optIndex)} className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] shadow-md hover:scale-110"><i className="fas fa-times"></i></button>
+                                             {opt.isUploading && <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10"><i className="fas fa-spinner fa-spin text-indigo-600 text-xs"></i></div>}
+                                             <img src={opt.imageUrl} className={`max-h-20 object-contain rounded ${opt.isUploading ? 'opacity-30' : ''}`} />
+                                          </div>
+                                        )}
                                       </div>
-                                    );
-                                  })}
-                                </div>
-                              </>
-                            )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          )}
 
-                            <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 shadow-sm">
-                              <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-3">
-                                <span className="text-indigo-800 text-[10px] font-black uppercase tracking-wide"><i className="fas fa-lightbulb mr-1"></i> Solution</span>
-                                <div className="flex flex-wrap gap-2">
-                                  <label className="bg-white border border-indigo-300 hover:bg-indigo-50 text-indigo-700 text-[10px] font-black px-3 py-1.5 rounded-lg shadow-sm transition cursor-pointer flex-1 sm:flex-none text-center">
-                                    <i className="fas fa-image"></i> Attach Image
-                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => initiateImageUpload(e.target.files[0], qIndex, 'explanation')} />
-                                  </label>
-                                  <button onClick={() => generateSolution(qIndex)} disabled={q.isGeneratingSolution} className="bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black px-3 py-1.5 rounded-lg shadow-sm transition flex items-center justify-center gap-1.5 flex-1 sm:flex-none disabled:opacity-50">
+                          <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 shadow-sm">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-3">
+                              <span className="text-indigo-800 text-[10px] font-black uppercase tracking-wide"><i className="fas fa-lightbulb mr-1"></i> Solution</span>
+                              <div className="flex flex-wrap gap-2">
+                                <label className="bg-white border border-indigo-300 hover:bg-indigo-50 text-indigo-700 text-[10px] font-black px-3 py-1.5 rounded-lg shadow-sm transition cursor-pointer flex-1 sm:flex-none text-center">
+                                  <i className="fas fa-image"></i> Attach Image
+                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => initiateImageUpload(e.target.files[0], qIndex, 'explanation')} />
+                                </label>
+                                
+                                {/* ⚡ GUEST BLOCKER FOR AI SOLVE ⚡ */}
+                                <GuestBlocker role="educator">
+                                  <button onClick={() => generateSolution(qIndex)} disabled={q.isGeneratingSolution} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black px-3 py-1.5 rounded-lg shadow-sm transition flex items-center justify-center gap-1.5 flex-1 sm:flex-none disabled:opacity-50">
                                     {q.isGeneratingSolution ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-wand-magic-sparkles"></i>} 
                                     AI Solve
                                   </button>
+                                </GuestBlocker>
+                              </div>
+                            </div>
+                            
+                            {q.explanation && (
+                              <div className="mb-3 p-4 bg-white rounded-xl border border-indigo-100 shadow-sm">
+                                <span className="text-[9px] font-black uppercase text-indigo-400 block mb-1">Solution Preview</span>
+                                <div className="text-sm font-medium text-slate-800 leading-relaxed overflow-x-auto">
+                                  <Latex>{q.explanation}</Latex>
                                 </div>
                               </div>
-                              
-                              {q.explanation && (
-                                <div className="mb-3 p-4 bg-white rounded-xl border border-indigo-100 shadow-sm">
-                                  <span className="text-[9px] font-black uppercase text-indigo-400 block mb-1">Solution Preview</span>
-                                  <div className="text-sm font-medium text-slate-800 leading-relaxed overflow-x-auto">
-                                    <Latex>{q.explanation}</Latex>
-                                  </div>
-                                </div>
-                              )}
+                            )}
 
-                              <textarea 
-                                value={q.explanation || ""} onChange={(e) => updateQuestionField(qIndex, 'explanation', e.target.value)} onPaste={(e) => handlePaste(e, qIndex, 'explanation')}
-                                className={`w-full bg-white border border-indigo-200 rounded-lg p-3 text-xs font-bold text-slate-900 outline-none focus:border-indigo-500 resize-y min-h-[60px] shadow-inner transition-shadow ${q.isGeneratingSolution ? 'opacity-50 animate-pulse' : ''}`} 
-                                placeholder="Type explanation, or click 'AI Solve' above..." 
-                                disabled={q.isGeneratingSolution}
-                              />
-                              {q.explanationImage && (
-                                <div className="relative mt-3 inline-block border border-slate-300 rounded-lg bg-slate-100 p-2 shadow-inner">
-                                   <button onClick={() => removeImage(qIndex, 'explanation')} className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-[10px] shadow-md hover:scale-110 z-20"><i className="fas fa-times"></i></button>
-                                   {q.isUploadingExp && <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10"><i className="fas fa-spinner fa-spin text-indigo-600 text-lg"></i></div>}
-                                   <img src={q.explanationImage} className={`max-h-32 object-contain rounded ${q.isUploadingExp ? 'opacity-30' : ''}`} />
-                                </div>
-                              )}
-                            </div>
+                            <textarea 
+                              value={q.explanation || ""} onChange={(e) => updateQuestionField(qIndex, 'explanation', e.target.value)} onPaste={(e) => handlePaste(e, qIndex, 'explanation')}
+                              className={`w-full bg-white border border-indigo-200 rounded-lg p-3 text-xs font-bold text-slate-900 outline-none focus:border-indigo-500 resize-y min-h-[60px] shadow-inner transition-shadow ${q.isGeneratingSolution ? 'opacity-50 animate-pulse' : ''}`} 
+                              placeholder="Type explanation, or click 'AI Solve' above..." 
+                              disabled={q.isGeneratingSolution}
+                            />
+                            {q.explanationImage && (
+                              <div className="relative mt-3 inline-block border border-slate-300 rounded-lg bg-slate-100 p-2 shadow-inner">
+                                 <button onClick={() => removeImage(qIndex, 'explanation')} className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-[10px] shadow-md hover:scale-110 z-20"><i className="fas fa-times"></i></button>
+                                 {q.isUploadingExp && <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10"><i className="fas fa-spinner fa-spin text-indigo-600 text-lg"></i></div>}
+                                 <img src={q.explanationImage} className={`max-h-32 object-contain rounded ${q.isUploadingExp ? 'opacity-30' : ''}`} />
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
 
-                {questions.length > 0 && (
-                  <div className="pt-6 pb-12 flex justify-center animate-in fade-in">
-                    <button 
-                      onClick={handleAddCustomQuestion} 
-                      disabled={isProcessing} 
-                      className="bg-white border-2 border-dashed border-emerald-300 text-emerald-600 px-8 py-4 rounded-2xl font-black hover:bg-emerald-50 hover:border-emerald-500 hover:-translate-y-1 transition-all shadow-sm flex items-center gap-3 group w-full max-w-md justify-center disabled:opacity-50"
-                    >
-                      <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform"><i className="fas fa-plus text-emerald-600 text-lg"></i></div>
-                      Add Another Question
-                    </button>
-                  </div>
-                )}
+              {questions.length > 0 && (
+                <div className="pt-6 pb-12 flex justify-center animate-in fade-in">
+                  <button 
+                    onClick={handleAddCustomQuestion} 
+                    disabled={isProcessing} 
+                    className="bg-white border-2 border-dashed border-emerald-300 text-emerald-600 px-8 py-4 rounded-2xl font-black hover:bg-emerald-50 hover:border-emerald-500 hover:-translate-y-1 transition-all shadow-sm flex items-center gap-3 group w-full max-w-md justify-center disabled:opacity-50"
+                  >
+                    <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform"><i className="fas fa-plus text-emerald-600 text-lg"></i></div>
+                    Add Another Question
+                  </button>
+                </div>
+              )}
 
-              </div>
             </div>
-
           </div>
+
         </div>
-      </main>
+      </div>
     </div>
   );
 }

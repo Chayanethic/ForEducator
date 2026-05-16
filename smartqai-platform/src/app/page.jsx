@@ -34,7 +34,8 @@ export default async function LandingPage() {
             <a href="#enterprise" className="hover:text-indigo-600 transition">For Institutions</a>
             <a href="#pricing" className="hover:text-indigo-600 transition">Pricing</a>
             
-            <Link href="/sign-in?redirect_url=/org/dashboard" className="flex items-center gap-2 text-indigo-700 bg-indigo-50 px-4 py-2 rounded-full hover:bg-indigo-100 transition shadow-sm border border-indigo-100 hover:scale-105 transform cursor-pointer">
+            {/* ⚡ UPDATED: Passes the Organization Role ⚡ */}
+            <Link href="/sign-in?role=organization" className="flex items-center gap-2 text-indigo-700 bg-indigo-50 px-4 py-2 rounded-full hover:bg-indigo-100 transition shadow-sm border border-indigo-100 hover:scale-105 transform cursor-pointer">
               <i className="fas fa-building"></i> Enterprise Login
             </Link>
           </div>
@@ -74,16 +75,17 @@ export default async function LandingPage() {
                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Portal</span>
                  </div>
                  
-                 <Link href="/sign-in?redirect_url=/student" className="flex items-center gap-3 px-4 py-3 hover:bg-indigo-50 text-left transition text-slate-700 text-sm font-bold w-full border-b border-slate-100">
+                 {/* ⚡ UPDATED ROLES ⚡ */}
+                 <Link href="/sign-in?role=student" className="flex items-center gap-3 px-4 py-3 hover:bg-indigo-50 text-left transition text-slate-700 text-sm font-bold w-full border-b border-slate-100">
                    <i className="fas fa-user-graduate text-indigo-500 w-4"></i> Student
                  </Link>
                  
-                 <Link href="/sign-in?redirect_url=/educator/dashboard" className="flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 text-left transition text-slate-700 text-sm font-bold w-full border-b border-slate-100">
+                 <Link href="/sign-in?role=educator" className="flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 text-left transition text-slate-700 text-sm font-bold w-full border-b border-slate-100">
                    <i className="fas fa-chalkboard-teacher text-emerald-500 w-4"></i> Educator
                  </Link>
                  
-                 <Link href="/sign-in?redirect_url=/org/dashboard" className="flex items-center gap-3 px-4 py-3 hover:bg-indigo-50 text-left transition text-slate-700 text-sm font-bold w-full">
-                   <i className="fas fa-building text-indigo-500 w-4"></i> Enterprise
+                 <Link href="/sign-in?role=organization" className="flex items-center gap-3 px-4 py-3 hover:bg-violet-50 text-left transition text-slate-700 text-sm font-bold w-full">
+                   <i className="fas fa-building text-violet-500 w-4"></i> Enterprise
                  </Link>
                </div>
              )}
@@ -132,29 +134,37 @@ export default async function LandingPage() {
                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Tap your portal to begin</p>
                  
                  <div className="flex items-center justify-center w-full max-w-md mx-auto bg-white/60 backdrop-blur-xl border border-slate-200 p-2 rounded-[2rem] shadow-xl shadow-indigo-900/10">
-                    
-                    {/* Student Dock Button */}
-                    <Link href="/sign-in?redirect_url=/student" className="flex-1 flex flex-col items-center justify-center gap-1.5 py-3 rounded-2xl hover:bg-indigo-50 transition cursor-pointer group">
-                      <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xl shadow-sm group-hover:scale-110 transition-transform"><i className="fas fa-user-graduate"></i></div>
-                      <span className="text-[10px] font-black text-slate-700 tracking-wide">Student</span>
-                    </Link>
+                   
+                   {/* Student Dock Button */}
+                   <Link href="/sign-in?role=student" className="flex-1 flex flex-col items-center justify-center gap-1.5 py-3 rounded-2xl hover:bg-indigo-50 transition cursor-pointer group">
+                     <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xl shadow-sm group-hover:scale-110 transition-transform"><i className="fas fa-user-graduate"></i></div>
+                     <span className="text-[10px] font-black text-slate-700 tracking-wide">Student</span>
+                   </Link>
 
-                    <div className="w-px h-12 bg-slate-200 mx-1"></div>
+                   <div className="w-px h-12 bg-slate-200 mx-1"></div>
 
-                    {/* Educator Dock Button */}
-                    <Link href="/sign-in?redirect_url=/educator/dashboard" className="flex-1 flex flex-col items-center justify-center gap-1.5 py-3 rounded-2xl hover:bg-emerald-50 transition cursor-pointer group">
-                      <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-xl shadow-sm group-hover:scale-110 transition-transform"><i className="fas fa-chalkboard-teacher"></i></div>
-                      <span className="text-[10px] font-black text-slate-700 tracking-wide">Educator</span>
-                    </Link>
+                   {/* Educator Dock Button */}
+                   <Link href="/sign-in?role=educator" className="flex-1 flex flex-col items-center justify-center gap-1.5 py-3 rounded-2xl hover:bg-emerald-50 transition cursor-pointer group">
+                     <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-xl shadow-sm group-hover:scale-110 transition-transform"><i className="fas fa-chalkboard-teacher"></i></div>
+                     <span className="text-[10px] font-black text-slate-700 tracking-wide">Educator</span>
+                   </Link>
 
-                    <div className="w-px h-12 bg-slate-200 mx-1"></div>
+                   <div className="w-px h-12 bg-slate-200 mx-1"></div>
 
-                    {/* Enterprise Dock Button */}
-                    <Link href="/sign-in?redirect_url=/org/dashboard" className="flex-1 flex flex-col items-center justify-center gap-1.5 py-3 rounded-2xl hover:bg-indigo-50 transition cursor-pointer group">
-                      <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xl shadow-sm group-hover:scale-110 transition-transform"><i className="fas fa-building"></i></div>
-                      <span className="text-[10px] font-black text-slate-700 tracking-wide">Enterprise</span>
-                    </Link>
+                   {/* Enterprise Dock Button */}
+                   <Link href="/sign-in?role=organization" className="flex-1 flex flex-col items-center justify-center gap-1.5 py-3 rounded-2xl hover:bg-violet-50 transition cursor-pointer group">
+                     <div className="w-12 h-12 bg-violet-100 text-violet-600 rounded-full flex items-center justify-center text-xl shadow-sm group-hover:scale-110 transition-transform"><i className="fas fa-building"></i></div>
+                     <span className="text-[10px] font-black text-slate-700 tracking-wide">Enterprise</span>
+                   </Link>
 
+                 </div>
+                 
+                 {/* ⚡ MOBILE GUEST LINKS ⚡ */}
+                 <div className="flex items-center gap-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-4">
+                    <span>Explore as Guest:</span>
+                    <Link href="/student" className="text-indigo-500 hover:text-indigo-700 transition underline">Student</Link>
+                    <span>|</span>
+                    <Link href="/educator/dashboard" className="text-emerald-500 hover:text-emerald-700 transition underline">Educator</Link>
                  </div>
               </div>
             </>
@@ -170,14 +180,14 @@ export default async function LandingPage() {
           <div className="mt-12 sm:mt-16 pt-8 border-t border-slate-200/60 max-w-4xl mx-auto animate-in fade-in duration-1000 delay-500">
             <p className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-widest mb-6 sm:mb-8">Trusted by top institutions</p>
             <div className="flex flex-wrap justify-center items-center gap-8 sm:gap-12 md:gap-24 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
-                <img src="https://res.cloudinary.com/dnpudf84r/image/upload/v1774474653/jis_p8zlvw.png" alt="JIS Group Logo" className="h-10 sm:h-14 w-auto object-contain hover:scale-105 transition-transform" />
-                <img src="https://res.cloudinary.com/dnpudf84r/image/upload/v1774474777/download_zfvub0.jpg" alt="NIT Logo" className="h-10 sm:h-14 w-auto object-contain hover:scale-105 transition-transform" />
+                <img src="https://res.cloudinary.com/dnpudf84r/image/upload/v1774474653/jis_p8zlvw.png" alt="JIS Group" className="h-10 sm:h-14 w-auto object-contain hover:scale-105 transition-transform" />
+                <img src="https://res.cloudinary.com/dnpudf84r/image/upload/v1774474777/download_zfvub0.jpg" alt="NIT" className="h-10 sm:h-14 w-auto object-contain hover:scale-105 transition-transform" />
             </div>
           </div>
           
         </div>
 
-        {/* --- ⚡ DESKTOP LOGIN GRID (Unified Indigo & Emerald) --- */}
+        {/* --- ⚡ DESKTOP LOGIN GRID ⚡ --- */}
         {!userId && (
           <div id="portals" className="hidden lg:grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 max-w-5xl mx-auto mt-24 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-500 px-4 sm:px-0">
             
@@ -187,12 +197,18 @@ export default async function LandingPage() {
                 <i className="fas fa-user-graduate"></i>
               </div>
               <h2 className="text-xl font-black text-slate-800 mb-3">Student</h2>
-              <p className="text-slate-500 font-medium text-sm mb-8 flex-1">
+              <p className="text-slate-500 font-medium text-sm mb-6 flex-1">
                 Access your personal dashboard, take AI-generated mock exams, and view your scorecards.
               </p>
-              <Link href="/sign-in?redirect_url=/student" className="block w-full bg-slate-50 border border-slate-200 text-slate-700 hover:text-indigo-700 py-3 rounded-xl font-black hover:bg-indigo-50 hover:border-indigo-200 transition text-center">
+              <Link href="/sign-in?role=student" className="block w-full bg-slate-50 border border-slate-200 text-slate-700 hover:text-indigo-700 py-3 rounded-xl font-black hover:bg-indigo-50 hover:border-indigo-200 transition text-center">
                 Student Login
               </Link>
+              {/* ⚡ DESKTOP GUEST LINK ⚡ */}
+              <div className="mt-4">
+                <Link href="/student" className="text-xs font-bold text-slate-400 hover:text-indigo-600 transition inline-flex items-center gap-1 group-hover:text-indigo-500">
+                   Explore as Guest <i className="fas fa-arrow-right text-[10px]"></i>
+                </Link>
+              </div>
             </div>
 
             {/* 2. SOLO EDUCATOR PORTAL */}
@@ -201,33 +217,41 @@ export default async function LandingPage() {
                 <i className="fas fa-chalkboard-teacher"></i>
               </div>
               <h2 className="text-xl font-black text-slate-800 mb-3">Solo Educator</h2>
-              <p className="text-slate-500 font-medium text-sm mb-8 flex-1">
+              <p className="text-slate-500 font-medium text-sm mb-6 flex-1">
                 Create AI mock exams, manage your personal library, and share private test links.
               </p>
-              <Link href="/sign-in?redirect_url=/educator/dashboard" className="block w-full bg-slate-50 border border-slate-200 text-slate-700 hover:text-emerald-700 py-3 rounded-xl font-black hover:bg-emerald-50 hover:border-emerald-200 transition text-center">
+              <Link href="/sign-in?role=educator" className="block w-full bg-slate-50 border border-slate-200 text-slate-700 hover:text-emerald-700 py-3 rounded-xl font-black hover:bg-emerald-50 hover:border-emerald-200 transition text-center">
                 Educator Login
               </Link>
+              {/* ⚡ DESKTOP GUEST LINK ⚡ */}
+              <div className="mt-4">
+                <Link href="/educator/dashboard" className="text-xs font-bold text-slate-400 hover:text-emerald-600 transition inline-flex items-center gap-1 group-hover:text-emerald-500">
+                   Explore as Guest <i className="fas fa-arrow-right text-[10px]"></i>
+                </Link>
+              </div>
             </div>
 
             {/* 3. ENTERPRISE (ORG) PORTAL */}
-            <div className="bg-slate-900 rounded-3xl p-8 border border-slate-800 shadow-sm hover:-translate-y-2 hover:shadow-xl hover:border-indigo-500 transition-all duration-300 flex flex-col h-full text-center group relative overflow-hidden">
-              <div className="absolute top-4 right-4 bg-indigo-500/20 text-indigo-300 text-[10px] font-black px-2.5 py-1 rounded uppercase tracking-widest border border-indigo-500/30">B2B</div>
-              <div className="w-16 h-16 bg-slate-800 text-indigo-400 border border-slate-700 rounded-full flex items-center justify-center text-2xl mx-auto mb-6 group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-500 transition-colors">
+            <div className="bg-slate-900 rounded-3xl p-8 border border-slate-800 shadow-sm hover:-translate-y-2 hover:shadow-xl hover:border-violet-500 transition-all duration-300 flex flex-col h-full text-center group relative overflow-hidden">
+              <div className="absolute top-4 right-4 bg-violet-500/20 text-violet-300 text-[10px] font-black px-2.5 py-1 rounded uppercase tracking-widest border border-violet-500/30">B2B</div>
+              <div className="w-16 h-16 bg-slate-800 text-violet-400 border border-slate-700 rounded-full flex items-center justify-center text-2xl mx-auto mb-6 group-hover:bg-violet-600 group-hover:text-white group-hover:border-violet-500 transition-colors">
                 <i className="fas fa-building"></i>
               </div>
               <h2 className="text-xl font-black text-white mb-3">Enterprise</h2>
-              <p className="text-slate-400 font-medium text-sm mb-8 flex-1">
+              <p className="text-slate-400 font-medium text-sm mb-6 flex-1">
                 Manage your institution, generate embed codes, and view lead analytics for your school.
               </p>
-              <Link href="/sign-in?redirect_url=/org/dashboard" className="block w-full bg-indigo-600 text-white py-3 rounded-xl font-black hover:bg-indigo-500 transition text-center shadow-lg">
+              <Link href="/sign-in?role=organization" className="block w-full bg-violet-600 text-white py-3 rounded-xl font-black hover:bg-violet-500 transition text-center shadow-lg">
                 Enterprise Login
               </Link>
+              {/* Invisible spacer to keep cards exactly the same height */}
+              <div className="mt-4 opacity-0 pointer-events-none text-xs">Spacer</div>
             </div>
 
           </div>
         )}
 
-        {/* --- FEATURE CARDS GRID (Unified Indigo & Emerald) --- */}
+        {/* --- FEATURE CARDS GRID --- */}
         <div id="features" className="max-w-5xl mx-auto mt-24 grid grid-cols-1 md:grid-cols-2 gap-6 scroll-mt-32 px-4 w-full">
           
           <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm hover:shadow-xl hover:border-indigo-200 transition-all duration-300 group md:hover:-translate-y-1">
@@ -277,10 +301,10 @@ export default async function LandingPage() {
         <div id="enterprise" className="max-w-5xl mx-auto mt-28 scroll-mt-24 px-4 w-full">
           
           <div className="text-center mb-12">
-            <span className="bg-indigo-50 text-indigo-600 border border-indigo-100 text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest mb-4 inline-flex items-center gap-2 shadow-sm">
+            <span className="bg-violet-50 text-violet-600 border border-violet-100 text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest mb-4 inline-flex items-center gap-2 shadow-sm">
               <i className="fas fa-building"></i> Ozone for Organizations
             </span>
-            <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-slate-900 mb-4 tracking-tight">Turn your website into a <br className="hidden sm:block"/> <span className="text-indigo-600">Lead Generation Engine.</span></h2>
+            <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-slate-900 mb-4 tracking-tight">Turn your website into a <br className="hidden sm:block"/> <span className="text-violet-600">Lead Generation Engine.</span></h2>
             <p className="text-base text-slate-500 font-medium max-w-2xl mx-auto">
               We provide Coaching Centers and Universities with a strict, anti-cheat exam engine. Embed white-label exams directly onto your own website, capture leads, and automate scorecard emails.
             </p>
@@ -290,10 +314,10 @@ export default async function LandingPage() {
             
             {/* Value Prop 1: Integration */}
             <div className="bg-slate-900 p-8 rounded-3xl border border-slate-800 shadow-xl group relative overflow-hidden flex flex-col justify-between">
-              <div className="absolute -right-10 -top-10 w-40 h-40 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"></div>
+              <div className="absolute -right-10 -top-10 w-40 h-40 bg-violet-500/20 rounded-full blur-3xl pointer-events-none"></div>
               
               <div className="relative z-10 mb-8">
-                <div className="w-12 h-12 bg-slate-800 text-indigo-400 border border-slate-700 rounded-xl flex items-center justify-center text-xl mb-6">
+                <div className="w-12 h-12 bg-slate-800 text-violet-400 border border-slate-700 rounded-xl flex items-center justify-center text-xl mb-6">
                   <i className="fas fa-code"></i>
                 </div>
                 <h3 className="text-xl font-black text-white mb-2">1-Minute Integration</h3>
@@ -308,10 +332,10 @@ export default async function LandingPage() {
                     <div className="w-2.5 h-2.5 rounded-full bg-slate-700"></div>
                   </div>
                   <div className="font-mono text-xs text-emerald-400 overflow-hidden leading-relaxed break-all">
-                    <span className="text-indigo-400">&lt;iframe</span><br/>
+                    <span className="text-violet-400">&lt;iframe</span><br/>
                     &nbsp;&nbsp;src="https://ozoneprep.com/embed/..."<br/>
                     &nbsp;&nbsp;width="100%" allow="fullscreen"<br/>
-                    <span className="text-indigo-400">&gt;&lt;/iframe&gt;</span>
+                    <span className="text-violet-400">&gt;&lt;/iframe&gt;</span>
                   </div>
                 </div>
               </div>
@@ -340,7 +364,7 @@ export default async function LandingPage() {
                   </div>
                   <span className="bg-emerald-500/20 text-emerald-400 text-[10px] font-black px-2 py-1 rounded">CAPTURED</span>
                 </div>
-                <div className="bg-indigo-500/20 border border-indigo-500/30 p-3 rounded-xl flex items-center justify-center gap-2 text-indigo-300 text-xs font-black group-hover:-translate-y-1 transition-transform delay-75">
+                <div className="bg-violet-500/20 border border-violet-500/30 p-3 rounded-xl flex items-center justify-center gap-2 text-violet-300 text-xs font-black group-hover:-translate-y-1 transition-transform delay-75">
                   <i className="fas fa-envelope-open-text"></i> Automated Scorecard Sent
                 </div>
               </div>
@@ -368,10 +392,10 @@ export default async function LandingPage() {
                 <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-emerald-500"></i> Basic Scorecards</li>
                 <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-emerald-500"></i> Private Mock Rooms</li>
               </ul>
-              <a href="#portals" className="block text-center w-full bg-slate-100 text-slate-700 text-sm font-black py-3 rounded-xl hover:bg-slate-200 transition border border-slate-200">Get Started</a>
+              <Link href="/sign-up?role=student" className="block text-center w-full bg-slate-100 text-slate-700 text-sm font-black py-3 rounded-xl hover:bg-slate-200 transition border border-slate-200">Get Started</Link>
             </div>
 
-            {/* Pro Tier (Highlighted - Indigo) */}
+            {/* Pro Tier */}
             <div className="bg-indigo-600 rounded-3xl p-8 border border-indigo-500 shadow-xl relative transform md:-translate-y-4 text-white">
               <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-emerald-400 text-slate-900 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest whitespace-nowrap shadow-sm">Most Popular</div>
               <h3 className="text-lg font-black mb-1 mt-2">Ozone Pro</h3>
@@ -382,7 +406,7 @@ export default async function LandingPage() {
                 <li className="flex items-center gap-3 font-bold text-sm"><i className="fas fa-check text-emerald-300"></i> Deep Diagnostic Reports</li>
                 <li className="flex items-center gap-3 font-bold text-sm"><i className="fas fa-check text-emerald-300"></i> Host Live Exam Rooms</li>
               </ul>
-              <a href="#portals" className="block text-center w-full bg-white text-indigo-600 text-sm font-black py-3 rounded-xl hover:bg-indigo-50 transition shadow-md">Upgrade to Pro</a>
+              <Link href="/sign-up?role=educator" className="block text-center w-full bg-white text-indigo-600 text-sm font-black py-3 rounded-xl hover:bg-indigo-50 transition shadow-md">Upgrade to Pro</Link>
             </div>
 
             {/* Institutional Tier */}
@@ -391,11 +415,11 @@ export default async function LandingPage() {
               <p className="text-slate-500 text-xs font-medium mb-6">For Coaching Centers & Schools.</p>
               <div className="text-4xl font-black text-slate-900 mb-6">₹2,999<span className="text-sm text-slate-400 font-medium">/mo</span></div>
               <ul className="space-y-4 mb-8">
-                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-indigo-600"></i> White-Label Embeds</li>
-                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-indigo-600"></i> Auto-Scorecard Emails</li>
-                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-indigo-600"></i> Lead Generation</li>
+                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-violet-600"></i> White-Label Embeds</li>
+                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-violet-600"></i> Auto-Scorecard Emails</li>
+                <li className="flex items-center gap-3 text-slate-700 font-bold text-sm"><i className="fas fa-check text-violet-600"></i> Lead Generation</li>
               </ul>
-              <a href="#portals" className="block text-center w-full bg-slate-900 text-white text-sm font-black py-3 rounded-xl hover:bg-slate-800 transition border border-slate-800">Access Portal</a>
+              <Link href="/sign-up?role=organization" className="block text-center w-full bg-slate-900 text-white text-sm font-black py-3 rounded-xl hover:bg-slate-800 transition border border-slate-800">Access Portal</Link>
             </div>
 
           </div>
@@ -411,9 +435,9 @@ export default async function LandingPage() {
             <p className="text-indigo-100 text-base md:text-lg mb-8 max-w-xl mx-auto relative z-10">
               Join thousands of educators and institutions building the future of test prep with Ozone.
             </p>
-            <a href="#portals" className="relative z-10 inline-block bg-white text-indigo-600 text-base font-black px-8 py-4 rounded-xl hover:bg-indigo-50 transition transform hover:-translate-y-1 shadow-lg">
+            <Link href="/sign-up?role=default" className="relative z-10 inline-block bg-white text-indigo-600 text-base font-black px-8 py-4 rounded-xl hover:bg-indigo-50 transition transform hover:-translate-y-1 shadow-lg">
               Create your Free Account
-            </a>
+            </Link>
           </div>
         </section>
       )}
@@ -448,7 +472,6 @@ export default async function LandingPage() {
             </ul>
           </div>
 
-          {/* Legal Column (MANDATORY FOR PAYMENT GATEWAYS) */}
           <div>
             <h4 className="font-black text-slate-900 mb-4 uppercase tracking-widest text-xs">Legal & Support</h4>
             <ul className="space-y-3 text-sm font-bold text-slate-500">

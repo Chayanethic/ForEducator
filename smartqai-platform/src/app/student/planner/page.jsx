@@ -120,7 +120,7 @@ export default function StudyPlannerPage() {
           </Link>
           <button className="md:hidden text-indigo-300 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}><i className="fas fa-times"></i></button>
         </div>
-
+  
             <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
             <button onClick={() => navigateTo('/student')} className="w-full flex items-center text-left gap-3 bg-indigo-800 text-white p-2.5 rounded-xl text-sm font-bold border-l-4 border-emerald-400 shadow-inner">
                 <i className="fas fa-home w-4 text-emerald-400"></i> Dashboard
@@ -142,12 +142,13 @@ export default function StudyPlannerPage() {
                 <i className="fas fa-book-open w-4"></i> PYQ Practice
             </button>
             <button id="tour-sidebar-planner" onClick={() => navigateTo('/student/planner')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
-                <i className="fas fa-calendar-check w-4"></i> Study Planer
+                <i className="fas fa-calendar-check w-4"></i> Study Planner
             </button>
             <button id="tour-sidebar-quiz" onClick={() => navigateTo('/student/quiz-battle')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
                 <i className="fas fa-gamepad w-4 text-rose-400 group-hover:animate-bounce"></i> Quiz Battle
             </button>
         </nav>
+
         
         <div className="p-3 border-t border-indigo-900 bg-indigo-900/30 space-y-1.5">
             <div className="flex items-center gap-2 p-2 bg-indigo-950/50 rounded-lg border border-indigo-800/50 shadow-inner">

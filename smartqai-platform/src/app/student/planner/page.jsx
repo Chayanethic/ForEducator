@@ -142,7 +142,7 @@ export default function StudyPlannerPage() {
                 <i className="fas fa-book-open w-4"></i> PYQ Practice
             </button>
             <button id="tour-sidebar-planner" onClick={() => navigateTo('/student/planner')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition">
-                <i className="fas fa-calendar-check w-4"></i> Study Planner
+                <i className="fas fa-calendar-check w-4"></i> Study Planer
             </button>
             <button id="tour-sidebar-quiz" onClick={() => navigateTo('/student/quiz-battle')} className="w-full flex items-center text-left gap-3 text-indigo-200 hover:bg-indigo-800 hover:text-white p-2.5 rounded-xl text-sm font-bold transition group">
                 <i className="fas fa-gamepad w-4 text-rose-400 group-hover:animate-bounce"></i> Quiz Battle
